@@ -1,0 +1,14 @@
+[Unit]
+Description=bobcat-gw ChirpStack MQTT Forwarder
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/opt/bobcat-gw/bin/chirpstack-mqtt-forwarder -c /var/lib/bobcat-gw/mqtt/chirpstack-mqtt-forwarder.toml
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

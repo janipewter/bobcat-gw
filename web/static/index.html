@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bobcat Gateway</title>
+<style>
+:root {
+  --bg: #f4f4f2; --surface: #fcfcfb; --surface-2: #f0f0ed; --border: #e2e2dd;
+  --text: #1c1c1a; --text-2: #55554f; --muted: #85857d;
+  --accent: #2a78d6; --accent-ink: #fff;
+  --series-up: #2a78d6; --series-down: #eb6834;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --grid: #e6e6e1;
+  --radius: 10px; --shadow: 0 1px 2px rgba(0,0,0,.04), 0 1px 1px rgba(0,0,0,.03);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121211; --surface: #1a1a19; --surface-2: #232321; --border: #2f2f2c;
+    --text: #ededea; --text-2: #b4b4ad; --muted: #85857d;
+    --accent: #3987e5; --series-up: #3987e5; --series-down: #d95926; --grid: #2a2a27;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121211; --surface: #1a1a19; --surface-2: #232321; --border: #2f2f2c;
+  --text: #ededea; --text-2: #b4b4ad; --muted: #85857d;
+  --accent: #3987e5; --series-up: #3987e5; --series-down: #d95926; --grid: #2a2a27;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+.bar { max-width: 1100px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.brand { font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.brand svg { width: 22px; height: 22px; color: var(--accent); }
+.eui { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text-2); font-size: 12.5px; }
+nav { display: flex; gap: 2px; margin-left: auto; flex-wrap: wrap; }
+nav button { background: none; border: 0; padding: 7px 12px; border-radius: 8px; color: var(--text-2); font: inherit; cursor: pointer; }
+nav button[aria-selected="true"] { background: var(--surface-2); color: var(--text); font-weight: 600; }
+main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
+.card h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.card h2 { margin: 0 0 12px; font-size: 16px; }
+.big { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.sub { color: var(--text-2); font-size: 13px; }
+.trunc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.muted { color: var(--muted); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.status .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.s-good .dot { background: var(--good); } .s-warning .dot { background: var(--warning); }
+.s-serious .dot { background: var(--serious); } .s-critical .dot { background: var(--critical); }
+.s-off .dot { background: var(--muted); }
+.pill { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--border); }
+section { display: none; } section.active { display: block; }
+.stack > * + * { margin-top: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.tablewrap { overflow-x: auto; }
+.dir { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+label { display: block; font-size: 13px; font-weight: 550; margin: 10px 0 4px; }
+.hint { font-size: 12px; color: var(--muted); margin-top: 3px; }
+input[type=text], input[type=password], input[type=number], select, textarea {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font: inherit; }
+textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; min-height: 90px; }
+input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.row { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font: inherit; font-weight: 550; cursor: pointer; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.danger { color: var(--critical); }
+.btn:disabled { opacity: .6; cursor: default; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; align-items: center; }
+.choices { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.choice { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; background: var(--surface); }
+.choice input { margin: 0 6px 0 0; }
+.choice b { font-size: 14px; } .choice span { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.choice:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.msg { padding: 9px 12px; border-radius: 8px; font-size: 13px; margin-top: 10px; border: 1px solid var(--border); background: var(--surface-2); }
+.msg.err { border-color: var(--critical); }
+.msg.ok { border-color: var(--good); }
+.hidden { display: none !important; }
+pre.log { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 11.5px;
+  max-height: 460px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: 190px; }
+.legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--text-2); margin-bottom: 6px; flex-wrap: wrap; align-items: center; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 9px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.12); white-space: nowrap; display: none; z-index: 3; }
+/* Until the page knows whether you are signed in, show nothing rather than a header that
+   then changes (tabs appearing, or the sign-in screen replacing it). */
+body.booting > header, body.booting > main { visibility: hidden; }
+/* sign-in */
+body.login-mode > header { display: none; }
+body.login-mode { background:
+  radial-gradient(70% 55% at 50% -10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%), var(--bg); }
+.signin { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+.signin-card { width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 32px 28px 26px; box-shadow: 0 10px 40px rgba(0,0,0,.10), var(--shadow); }
+.signin-mark { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; margin: 0 auto 18px;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); }
+.signin-mark svg { width: 30px; height: 30px; }
+.signin-card h1 { margin: 0; font-size: 21px; font-weight: 650; text-align: center; letter-spacing: -.01em; }
+.signin-sub { margin: 6px 0 24px; text-align: center; color: var(--text-2); font-size: 13.5px; }
+.pw-wrap { position: relative; }
+.pw-wrap input { padding: 11px 44px 11px 12px; font-size: 15px; border-radius: 10px; }
+.pw-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border: 0; border-radius: 8px;
+  background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.pw-toggle:hover { color: var(--text); background: var(--surface-2); }
+.pw-toggle svg { width: 19px; height: 19px; }
+.signin-btn { width: 100%; justify-content: center; margin-top: 16px; padding: 11px 14px; font-size: 15px; border-radius: 10px; }
+.signin-btn .spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+  animation: spin .7s linear infinite; display: none; }
+.signin-btn.busy .spin { display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+.signin-card.shake { animation: shake .35s; }
+.signin-err { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; padding: 9px 12px; border-radius: 10px; font-size: 13px;
+  color: var(--text); background: color-mix(in srgb, var(--critical) 11%, transparent); border: 1px solid color-mix(in srgb, var(--critical) 45%, transparent); }
+.signin-err svg { width: 17px; height: 17px; flex: none; color: var(--critical); margin-top: 1px; }
+.signin-foot { margin-top: 20px; text-align: center; font-size: 12px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .signin-card.shake, .signin-btn .spin { animation: none; } }
+.linkbtn { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; padding: 0; }
+.hdr-logout { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: none; color: var(--text-2); font: inherit; cursor: pointer; }
+.hdr-logout:hover { color: var(--text); background: var(--surface-2); }
+.hdr-logout svg { width: 16px; height: 16px; }
+@media (max-width: 640px) { .hdr-logout span { display: none; } .hdr-logout { order: 2; margin-left: auto; } nav { order: 3; } }
+@media (max-width: 640px) { nav { margin-left: 0; width: 100%; } nav button { flex: 1; padding: 7px 6px; } .big { font-size: 24px; } }
+</style>
+</head>
+<body class="booting">
+<header>
+  <div class="bar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M12 20v-8"/><circle cx="12" cy="10" r="2"/><path d="M8.5 13.5a5 5 0 0 1 0-7"/><path d="M15.5 6.5a5 5 0 0 1 0 7"/>
+        <path d="M5.6 16.4a9 9 0 0 1 0-12.8"/><path d="M18.4 3.6a9 9 0 0 1 0 12.8"/></svg>
+      <span id="hostname">__HOSTNAME__</span>
+    </div>
+    <span class="eui" id="hdr-eui"></span>
+    <span id="hdr-status"></span>
+    <nav id="nav" class="hidden" role="tablist">
+      <button data-tab="dash" aria-selected="true">Dashboard</button>
+      <button data-tab="lns">LNS</button>
+      <button data-tab="net">Network</button>
+      <button data-tab="sys">System</button>
+    </nav>
+    <button type="button" class="hdr-logout hidden" id="hdr-logout" title="Sign out" aria-label="Sign out">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+      <span>Sign out</span>
+    </button>
+  </div>
+</header>
+
+<main>
+  <!-- Login -->
+  <section id="login">
+    <div class="signin">
+      <form class="signin-card" id="login-form" novalidate>
+        <div class="signin-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M12 20v-8"/><circle cx="12" cy="10" r="2"/><path d="M8.5 13.5a5 5 0 0 1 0-7"/><path d="M15.5 6.5a5 5 0 0 1 0 7"/>
+            <path d="M5.6 16.4a9 9 0 0 1 0-12.8"/><path d="M18.4 3.6a9 9 0 0 1 0 12.8"/></svg>
+        </div>
+        <h1 id="login-host">__HOSTNAME__</h1>
+        <p class="signin-sub">Sign in to manage this gateway</p>
+        <input type="text" name="username" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true"
+               style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+        <label for="login-pw" style="margin-top:0">Password</label>
+        <div class="pw-wrap">
+          <input type="password" id="login-pw" name="password" autocomplete="current-password" autofocus required>
+          <button type="button" class="pw-toggle" id="pw-toggle" aria-label="Show password" title="Show password">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" id="pw-eye">
+              <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+        <div id="login-msg" role="alert" aria-live="polite"></div>
+        <button class="btn primary signin-btn" type="submit" id="login-btn"><span class="spin"></span><span id="login-btn-text">Sign in</span></button>
+        <div class="signin-foot">Bobcat 300 LoRaWAN gateway</div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Dashboard -->
+  <section id="dash">
+    <div class="stack">
+      <div class="grid">
+        <div class="card">
+          <h3>LNS connection</h3>
+          <div id="d-lns" class="big" style="font-size:20px"></div>
+          <div class="sub trunc" id="d-lns-target"></div>
+          <div class="sub" id="d-lns-detail"></div>
+        </div>
+        <div class="card">
+          <h3>Uplinks</h3>
+          <div class="big" id="d-up">0</div>
+          <div class="sub" id="d-up-sub"></div>
+          <div class="hint" id="d-up-total"></div>
+        </div>
+        <div class="card">
+          <h3>Downlinks</h3>
+          <div class="big" id="d-down">0</div>
+          <div class="sub" id="d-down-sub"></div>
+          <div class="hint" id="d-down-total"></div>
+        </div>
+        <div class="card">
+          <h3>Last uplink</h3>
+          <div class="big" id="d-last" style="font-size:20px">—</div>
+          <div class="sub mono" id="d-last-dev"></div>
+          <div class="sub" id="d-last-sub"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+          <h3 style="margin:0">Packets per hour, last 24 h</h3>
+          <button class="linkbtn" id="chart-toggle">Show table</button>
+        </div>
+        <div class="legend"><span><i style="background:var(--series-up)"></i>Uplinks</span><span><i style="background:var(--series-down)"></i>Downlinks</span></div>
+        <div class="chart" id="chart"><svg id="chart-svg" role="img" aria-label="Uplinks and downlinks per hour"></svg><div class="tip" id="chart-tip"></div></div>
+        <div class="tablewrap hidden" id="chart-table"></div>
+      </div>
+
+      <div class="grid">
+        <div class="card"><h3>Concentrator</h3><dl class="kv" id="d-conc"></dl></div>
+        <div class="card"><h3>Counters</h3><dl class="kv" id="d-counters"></dl></div>
+        <div class="card"><h3>Network</h3><dl class="kv" id="d-net"></dl></div>
+      </div>
+
+      <div class="card">
+        <h3>Recent packets</h3>
+        <div class="tablewrap"><table id="d-packets"></table></div>
+        <div class="sub muted" id="d-packets-empty">No packets yet.</div>
+      </div>
+
+      <div class="card" id="d-events-card">
+        <h3>Recent warnings and errors</h3>
+        <div class="tablewrap"><table id="d-events"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LNS -->
+  <section id="lns">
+    <form class="card" id="lns-form">
+      <h2>Gateway</h2>
+      <div class="row">
+        <div>
+          <label for="region" style="margin-top:0">Region / frequency plan</label>
+          <select id="region"></select>
+          <div class="hint" id="region-hint"></div>
+        </div>
+        <div id="subband-wrap">
+          <label for="subband" style="margin-top:0">Sub-band</label>
+          <select id="subband"></select>
+          <div class="hint">TTN uses sub-band 2.</div>
+        </div>
+      </div>
+      <label for="eui">Gateway EUI</label>
+      <input type="text" id="eui" readonly tabindex="-1" spellcheck="false" style="font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--surface-2);cursor:default">
+      <div class="hint" id="eui-hint"></div>
+
+      <h2 style="margin-top:26px">Network server</h2>
+      <label>Connection method</label>
+      <div class="choices" id="backend-choices">
+        <label class="choice"><input type="radio" name="backend" value="udp"><b>Semtech UDP</b><span>Packet forwarder. TTN, ChirpStack, Helium, most LNS.</span></label>
+        <label class="choice"><input type="radio" name="backend" value="basicstation"><b>LoRa Basics Station</b><span>Secure WebSocket (LNS) or CUPS. TTN, ChirpStack, AWS IoT.</span></label>
+        <label class="choice"><input type="radio" name="backend" value="mqtt"><b>MQTT</b><span>ChirpStack MQTT Forwarder, straight to a broker.</span></label>
+        <label class="choice"><input type="radio" name="backend" value="monitor"><b>Monitor only</b><span>Receive and show packets here. Nothing is forwarded.</span></label>
+        <label class="choice"><input type="radio" name="backend" value="none"><b>Disabled</b><span>Concentrator off.</span></label>
+      </div>
+
+      <div id="lns-pick" class="msg hidden" style="margin-top:12px">Choose <b>Semtech UDP</b>, <b>LoRa Basics Station</b> or <b>MQTT</b> above to enter the network server details.</div>
+
+      <div id="lns-common">
+        <div class="row">
+          <div id="preset-wrap">
+            <label for="preset">Network server preset</label>
+            <select id="preset"></select>
+            <div class="hint">Fills in the server fields below. You can still edit them.</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="f-udp" class="backend-fields">
+        <div class="row">
+          <div><label for="udp-server">Server address</label><input type="text" id="udp-server" placeholder="eu1.cloud.thethings.network"></div>
+          <div><label for="udp-up">Uplink port</label><input type="number" id="udp-up" min="1" max="65535"></div>
+          <div><label for="udp-down">Downlink port</label><input type="number" id="udp-down" min="1" max="65535"></div>
+        </div>
+        <div class="hint">In The Things Stack, register the gateway with this EUI. No key is needed for UDP.</div>
+      </div>
+
+      <div id="f-basicstation" class="backend-fields">
+        <div class="row">
+          <div>
+            <label for="bs-mode">Mode</label>
+            <select id="bs-mode"><option value="lns">LNS (direct WebSocket)</option><option value="cups">CUPS (managed configuration)</option></select>
+          </div>
+          <div style="grid-column: span 2">
+            <label for="bs-uri" id="bs-uri-label">LNS URI</label>
+            <input type="text" id="bs-uri" placeholder="wss://eu1.cloud.thethings.network:8887">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="bs-auth">Authentication</label>
+            <select id="bs-auth"><option value="token">API key / token</option><option value="tls">TLS client certificate</option><option value="none">None</option></select>
+          </div>
+          <div style="grid-column: span 2" id="bs-token-wrap">
+            <label for="bs-token">API key</label>
+            <input type="password" id="bs-token" autocomplete="off" placeholder="NNSXS....">
+            <div class="hint">For TTN, create a gateway API key with <i>Link as Gateway to a Gateway Server</i> rights (LNS), or <i>View and edit gateway information</i> as well (CUPS). It is sent as <code>Authorization: Bearer &lt;key&gt;</code>.</div>
+          </div>
+        </div>
+        <div id="bs-tls-wrap">
+          <label for="bs-cert">Client certificate (PEM)</label><textarea id="bs-cert" spellcheck="false"></textarea>
+          <label for="bs-key">Client private key (PEM)</label><textarea id="bs-key" spellcheck="false" placeholder="Leave unchanged to keep the stored key"></textarea>
+        </div>
+        <label for="bs-trust">Server CA certificate (PEM, optional)</label>
+        <textarea id="bs-trust" spellcheck="false" placeholder="Empty: use the system CA bundle (works for TTN and other public certificates)"></textarea>
+      </div>
+
+      <div id="f-mqtt" class="backend-fields">
+        <div class="row">
+          <div style="grid-column: span 2"><label for="mq-server">Broker</label><input type="text" id="mq-server" placeholder="tcp://chirpstack.example.com:1883"><div class="hint">tcp://, ssl://, ws:// or wss://</div></div>
+          <div><label for="mq-prefix">Topic prefix</label><input type="text" id="mq-prefix" placeholder="eu868"><div class="hint">Must match the ChirpStack region ID, e.g. eu868, us915_1.</div></div>
+        </div>
+        <div class="row">
+          <div><label for="mq-user">Username</label><input type="text" id="mq-user" autocomplete="off"></div>
+          <div><label for="mq-pass">Password</label><input type="password" id="mq-pass" autocomplete="off"></div>
+          <div><label for="mq-json">Payload encoding</label><select id="mq-json"><option value="false">Protobuf (default)</option><option value="true">JSON</option></select></div>
+        </div>
+        <details style="margin-top:10px"><summary class="sub">TLS certificates</summary>
+          <label for="mq-ca">CA certificate (PEM)</label><textarea id="mq-ca" spellcheck="false"></textarea>
+          <label for="mq-cert">Client certificate (PEM)</label><textarea id="mq-cert" spellcheck="false"></textarea>
+          <label for="mq-key">Client key (PEM)</label><textarea id="mq-key" spellcheck="false" placeholder="Leave unchanged to keep the stored key"></textarea>
+        </details>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" type="submit" id="lns-save">Save and apply</button>
+        <span class="sub" id="lns-msg"></span>
+      </div>
+    </form>
+  </section>
+
+  <!-- Network -->
+  <section id="net">
+    <div class="stack">
+      <div class="card"><h2>Interfaces</h2><div class="tablewrap"><table id="n-devs"></table></div>
+        <p class="sub" style="margin-bottom:0">This gateway is Ethernet only. The Bobcat's built-in WiFi is switched off: its driver can lock up the board, especially while it starts.</p></div>
+      <div class="card" id="ts-card">
+        <h2>Tailscale</h2>
+        <p class="sub" style="margin-top:0">Reach this gateway, including this web UI, from anywhere over your private Tailscale network, without opening any ports.</p>
+        <div id="ts-status" style="margin-bottom:10px"></div>
+        <dl class="kv" id="ts-info"></dl>
+        <div id="ts-login" class="msg hidden" style="margin-top:10px"></div>
+        <div id="ts-form">
+          <div class="row">
+            <div><label for="ts-host">Device name</label><input type="text" id="ts-host" autocomplete="off"><div class="hint">Shown in your Tailscale admin console.</div></div>
+            <div><label for="ts-key">Auth key (optional)</label><input type="password" id="ts-key" autocomplete="off" placeholder="tskey-auth-..."><div class="hint">Leave empty to log in with a link instead. The key is used once and not stored.</div></div>
+          </div>
+          <label class="choice" style="display:inline-block;margin-top:10px"><input type="checkbox" id="ts-ssh"> <b>Tailscale SSH</b> <span>Allow SSH to this gateway over Tailscale, authenticated by your tailnet.</span></label>
+        </div>
+        <div class="actions">
+          <button class="btn primary" type="button" id="ts-up">Connect</button>
+          <button class="btn" type="button" id="ts-down">Disconnect</button>
+          <button class="btn danger" type="button" id="ts-logout">Log out</button>
+          <span class="sub" id="ts-msg"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- System -->
+  <section id="sys">
+    <div class="stack">
+      <div class="grid">
+        <div class="card"><h3>System</h3><dl class="kv" id="s-info"></dl></div>
+        <div class="card"><h3>Boot safety (package holds)</h3><div id="s-holds"></div></div>
+        <form class="card" id="tz-form">
+          <h3>Time zone</h3>
+          <label for="tz-sel" style="margin-top:0">Gateway time zone</label>
+          <select id="tz-sel"><option>Loading…</option></select>
+          <div class="hint">Used for all times in this web UI and in the service logs. The time itself comes from NTP.</div>
+          <div class="actions"><button class="btn primary" type="submit">Save</button><span class="sub" id="tz-msg"></span></div>
+        </form>
+        <div class="card"><h3>Services</h3><dl class="kv" id="s-services"></dl>
+          <div class="actions"><button class="btn" id="s-restart">Restart gateway services</button></div>
+          <div class="sub" id="s-msg"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <h2 style="margin:0;margin-right:auto">Logs</h2>
+          <select id="log-unit" style="width:auto">
+            <option value="pktfwd">Packet forwarder</option><option value="station">Basics Station</option>
+            <option value="mqtt">MQTT forwarder</option><option value="web">Web UI</option>
+          </select>
+          <button class="btn" id="log-refresh">Refresh</button>
+        </div>
+        <pre class="log" id="log">Select a service.</pre>
+      </div>
+      <form class="card" id="pw-form">
+        <h2>Web UI password</h2>
+        <div class="row">
+          <div><label for="pw-cur">Current password</label><input type="password" id="pw-cur" autocomplete="current-password"></div>
+          <div><label for="pw-new">New password</label><input type="password" id="pw-new" autocomplete="new-password" minlength="8"></div>
+        </div>
+        <div class="actions"><button class="btn primary" type="submit">Change password</button><span class="sub" id="pw-msg"></span></div>
+      </form>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const MASK = "••••••";
+let EUI_SOURCE = "chip", CFG = null, HW = {}, REGIONS = {}, STATUS = null, tab = "dash", timer = null, showTable = false;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json", "X-Requested-With": "bobcat-gw"},
+    body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (r.status === 401) { showLogin(); throw new Error("Please sign in."); }
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtNum = (n) => (n ?? 0).toLocaleString();
+function ago(ts) {
+  if (!ts) return "never";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return Math.round(s) + " s ago";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  if (s < 86400) return Math.round(s / 3600) + " h ago";
+  return Math.round(s / 86400) + " d ago";
+}
+// All times are shown in the gateway's time zone (System tab), not the browser's, so they
+// match the service logs.
+let TZ = null;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+let tzFmt = null, tzFmtFor;
+function tparts(ts) {
+  if (!tzFmt || tzFmtFor !== TZ) {
+    const o = {year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"};
+    try { tzFmt = new Intl.DateTimeFormat("en-GB", Object.assign({timeZone: TZ || undefined}, o)); }
+    catch (e) { tzFmt = new Intl.DateTimeFormat("en-GB", o); }  // unknown zone: browser's own
+    tzFmtFor = TZ;
+  }
+  const ms = Math.floor(ts * 1000), p = {};
+  for (const x of tzFmt.formatToParts(new Date(ms))) p[x.type] = x.value;
+  const n = (k) => Number(p[k]);
+  // UTC offset in minutes: the zone's wall-clock time read as UTC, minus the real instant
+  const off = Math.round((Date.UTC(n("year"), n("month") - 1, n("day"), n("hour"), n("minute"), n("second")) - (ms - ms % 1000)) / 60000);
+  return {y: p.year, mo: p.month, d: p.day, h: p.hour, mi: p.minute, s: p.second, mon: MONTHS[n("month") - 1], day: n("day"), hour: n("hour"), off};
+}
+const clock = (ts) => { const t = tparts(ts); return `${t.h}:${t.mi}:${t.s}`; };
+// "2026-10-10T12:29:49+01:00"
+function iso(ts) {
+  const t = tparts(ts), a = Math.abs(t.off);
+  return `${t.y}-${t.mo}-${t.d}T${t.h}:${t.mi}:${t.s}${t.off < 0 ? "-" : "+"}${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
+}
+const dayMonth = (t) => `${t.day} ${t.mon}`;
+function dur(s) {
+  s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return (d ? d + "d " : "") + (h || d ? h + "h " : "") + m + "m";
+}
+// "wss://eu1.cloud.thethings.network:8887" -> "eu1.cloud.thethings.network" (full target goes in the tooltip)
+function lnsHost(target) {
+  const m = /^(?:[a-z]+:\/\/)?([^/:]+)/i.exec(target || "");
+  return m ? m[1] : "";
+}
+// Time only for today, otherwise "5 Aug 10:00".
+function shortDate(ts) {
+  const t = tparts(ts), now = tparts(Date.now() / 1000), hm = `${t.h}:${t.mi}`;
+  return t.y === now.y && t.mo === now.mo && t.d === now.d ? hm : dayMonth(t) + " " + hm;
+}
+function statusBadge(level, text) {
+  return `<span class="status s-${level}"><span class="dot"></span>${esc(text)}</span>`;
+}
+function setMsg(el, text, kind) {
+  el.textContent = text || "";
+  el.className = kind === "err" ? "msg err" : kind === "ok" ? "msg ok" : "sub";
+  if (!text) el.className = "sub";
+}
+
+// ---- navigation
+document.querySelectorAll("#nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.tab)));
+function go(t) {
+  tab = t;
+  try { localStorage.setItem("bgw-tab", t); } catch (e) {}
+  document.querySelectorAll("#nav button").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === t));
+  document.querySelectorAll("main > section").forEach((s) => s.classList.toggle("active", s.id === t));
+  if (t === "lns" || t === "net") loadConfig();
+  if (t === "net") { loadNetwork(); loadTailscale(); } else clearTimeout(tsTimer);
+  if (t === "sys") { loadSystem(); loadLog(); loadTimezones(); }
+}
+
+// ---- login
+function showLogin() {
+  clearInterval(timer);
+  document.body.classList.add("login-mode");
+  // nothing about the gateway (EUI, mode) is shown, or kept in the page, while signed out
+  $("hdr-eui").textContent = ""; $("hdr-status").innerHTML = "";
+  $("nav").classList.add("hidden"); $("hdr-logout").classList.add("hidden");
+  document.querySelectorAll("main > section").forEach((s) => s.classList.toggle("active", s.id === "login"));
+  setTimeout(() => { try { $("login-pw").focus(); } catch (e) {} }, 50);
+}
+$("pw-toggle").addEventListener("click", () => {
+  const input = $("login-pw"), show = input.type === "password";
+  input.type = show ? "text" : "password";
+  $("pw-toggle").setAttribute("aria-label", show ? "Hide password" : "Show password");
+  $("pw-toggle").title = show ? "Hide password" : "Show password";
+  $("pw-eye").innerHTML = show
+    ? '<path d="M3 3l18 18"/><path d="M10.6 6.2A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.5 7.5A17 17 0 0 0 2 12s3.6 7 10 7a9.6 9.6 0 0 0 4-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'
+    : '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>';
+  input.focus();
+});
+function loginError(text) {
+  $("login-msg").innerHTML = text
+    ? `<div class="signin-err"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/></svg><span>${esc(text)}</span></div>` : "";
+}
+$("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("login-btn");
+  if (btn.classList.contains("busy")) return;
+  loginError("");
+  btn.classList.add("busy"); btn.disabled = true; $("login-btn-text").textContent = "Signing in…";
+  try {
+    await api("/api/login", {password: $("login-pw").value});
+    $("login-pw").value = ""; $("login-pw").type = "password";
+    await start();
+  } catch (err) {
+    loginError(err.message);
+    const card = document.querySelector(".signin-card");
+    card.classList.remove("shake"); void card.offsetWidth; card.classList.add("shake");
+    $("login-pw").select();
+  } finally {
+    btn.classList.remove("busy"); btn.disabled = false; $("login-btn-text").textContent = "Sign in";
+  }
+});
+async function signOut() { try { await api("/api/logout", {}); } catch (e) {} showLogin(); }
+$("hdr-logout").addEventListener("click", signOut);
+
+async function start() {
+  let s;
+  try { s = await (await fetch("/api/session")).json(); }
+  catch (e) {
+    showLogin(); document.body.classList.remove("booting");
+    loginError("Can't reach the gateway. Reload the page to try again.");
+    return;
+  }
+  if (s.hostname) { $("hostname").textContent = s.hostname; $("login-host").textContent = s.hostname; }
+  if (!s.authenticated) { showLogin(); document.body.classList.remove("booting"); return; }
+  document.body.classList.remove("login-mode");
+  $("nav").classList.remove("hidden"); $("hdr-logout").classList.remove("hidden");
+  document.body.classList.remove("booting");
+  let t = "dash";
+  try { t = localStorage.getItem("bgw-tab") || "dash"; } catch (e) {}
+  go(t);
+  refresh();
+  clearInterval(timer);
+  timer = setInterval(refresh, 5000);
+}
+
+// ---- dashboard
+const LNS_STATE = {
+  connected: ["good", "Connected"], connecting: ["warning", "Connecting"], disconnected: ["critical", "Disconnected"],
+  error: ["critical", "Error"], stopped: ["off", "Stopped"], disabled: ["off", "Disabled"], monitor: ["good", "Monitoring"]};
+const SVC_NAME = {pktfwd: "Packet forwarder", mqtt: "MQTT forwarder", station: "Basics Station"};
+const BACKEND_NAME = {udp: "Semtech UDP", basicstation: "LoRa Basics Station", mqtt: "MQTT", monitor: "Monitor only", none: "Disabled"};
+
+async function refresh() {
+  if (document.hidden) return;
+  try { STATUS = await api("/api/status"); } catch (e) { return; }
+  const s = STATUS;
+  TZ = s.timezone || null;
+  $("hdr-eui").textContent = s.gateway_eui ? "EUI " + s.gateway_eui : "";
+  const [lvl, txt] = LNS_STATE[s.lns.state] || ["off", s.lns.state];
+  $("hdr-status").innerHTML = `<span class="pill">${statusBadge(lvl, BACKEND_NAME[s.backend] + " · " + txt)}</span>`;
+  if (tab === "dash") renderDash(s);
+  if (tab === "sys") renderServices(s);
+}
+
+function renderDash(s) {
+  const [lvl, txt] = LNS_STATE[s.lns.state] || ["off", s.lns.state];
+  $("d-lns").innerHTML = statusBadge(lvl, txt);
+  const lnsUsed = !["none", "monitor"].includes(s.backend);
+  $("d-lns-target").textContent = lnsUsed ? lnsHost(s.lns_target) : "";
+  $("d-lns-target").title = lnsUsed ? s.lns_target : "";
+  const bits = lnsUsed ? [BACKEND_NAME[s.backend]] : [];
+  if (s.lns.region) bits.push(s.lns.region);
+  if (s.lns.state === "connected" && s.lns.since) bits.push("up " + ago(s.lns.since).replace(" ago", ""));
+  if (s.lns.rtt_ms != null && s.lns.state === "connected") bits.push(s.lns.rtt_ms + " ms RTT");
+  if (s.lns.detail) bits.push(s.lns.detail);
+  $("d-lns-detail").textContent = bits.join(" · ");
+
+  const c = s.counters;
+  const t = s.totals;
+  const bootTxt = "since boot " + shortDate(t.boot_time);
+  const totalTxt = (n) => fmtNum(n) + " total" + (t.total_since ? " since " + shortDate(t.total_since) : "");
+  $("d-up").textContent = fmtNum(t.boot_up);
+  $("d-up-sub").textContent = bootTxt;
+  $("d-up-total").textContent = totalTxt(t.total_up);
+  if (s.backend === "monitor") {
+    $("d-down").textContent = "—";
+    $("d-down-sub").textContent = "Not used in Monitor only mode.";
+    $("d-down-total").textContent = "";
+  } else {
+    $("d-down").textContent = fmtNum(t.boot_down);
+    $("d-down-sub").textContent = bootTxt + (c.tx_errors ? " · " + fmtNum(c.tx_errors) + " TX errors in 24 h" : "");
+    $("d-down-total").textContent = totalTxt(t.total_down);
+  }
+
+  const lastUp = s.packets.find((p) => p.dir === "up");
+  if (lastUp) {
+    $("d-last").textContent = ago(lastUp.ts);
+    $("d-last-dev").textContent = lastUp.dev_addr ? lastUp.dev_addr : lastUp.dev_eui ? "DevEUI " + lastUp.dev_eui : "";
+    $("d-last-sub").textContent = [lastUp.rssi != null ? lastUp.rssi + " dBm" : "", lastUp.snr != null ? "SNR " + lastUp.snr + " dB" : ""].filter(Boolean).join(" · ");
+  } else { $("d-last").textContent = "—"; $("d-last-dev").textContent = ""; $("d-last-sub").textContent = "No uplinks received yet."; }
+
+  const conc = s.concentrator;
+  const cl = {running: ["good", "Running"], starting: ["warning", "Starting"], error: ["critical", "Error"], stopped: ["off", "Stopped"], unknown: ["off", "Unknown"]}[conc.state] || ["off", conc.state];
+  const svc = Object.entries(s.services).filter(([k, v]) => v.state === "active" || v.restarts);
+  $("d-conc").innerHTML = `<dt>State</dt><dd>${statusBadge(cl[0], cl[1])}</dd>` +
+    (conc.detail ? `<dt>Detail</dt><dd>${esc(conc.detail)}</dd>` : "") +
+    `<dt>Region</dt><dd>${esc(s.region)}${["US915", "AU915"].includes(s.region) ? " sub-band " + s.subband : ""}</dd>` +
+    svc.map(([k, v]) => `<dt>${esc(SVC_NAME[k] || k)}</dt><dd>${esc(v.state)}${v.restarts ? " · " + v.restarts + " restarts" : ""}</dd>`).join("");
+
+  const rows = [];
+  if (s.backend === "monitor") {
+    rows.push(["Received by radio", c.rx_total], ["CRC OK", c.rx_ok], ["CRC failed", c.rx_bad]);
+  } else if (s.backend !== "basicstation") {
+    rows.push(["Received by radio", c.rx_total], ["CRC OK", c.rx_ok], ["CRC failed", c.rx_bad], ["Forwarded", c.rx_forwarded]);
+    if (s.lns.push_ack_pct != null) rows.push(["Uplinks acknowledged", s.lns.push_ack_pct.toFixed(1) + " %"]);
+    rows.push(["Downlinks from LNS", c.dl_received], ["Sent to radio", c.tx_requested], ["TX errors", c.tx_errors]);
+  } else {
+    rows.push(["Uplinks forwarded", c.rx_forwarded], ["Downlinks sent", c.tx_requested]);
+  }
+  $("d-counters").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${typeof v === "string" ? esc(v) : fmtNum(v || 0)}</dd>`).join("");
+
+  renderChart(s.hourly);
+  renderPackets(s.packets);
+  $("d-events-card").classList.toggle("hidden", !s.events.length);
+  $("d-events").innerHTML = "<tr><th>Time</th><th>Service</th><th>Message</th></tr>" + s.events.map((e) =>
+    `<tr><td>${clock(e.ts)}</td><td>${esc(SVC_NAME[e.unit] || e.unit)}</td><td style="white-space:normal">${statusBadge(e.level === "error" ? "critical" : "warning", "")} ${esc(e.msg)}</td></tr>`).join("");
+  loadNetSummary();
+}
+
+let netSummaryTime = 0;
+async function loadNetSummary() {
+  if (Date.now() - netSummaryTime < 15000) return;
+  netSummaryTime = Date.now();
+  try {
+    const n = await api("/api/network");
+    const rows = n.devices.map((d) => `<dt>${esc(d.device)}</dt><dd>${esc(d.state)}${d.ipv4.length ? " · " + esc(d.ipv4.join(", ")) : ""}</dd>`);
+    $("d-net").innerHTML = rows.join("");
+  } catch (e) {}
+}
+
+function renderPackets(pk) {
+  $("d-packets-empty").classList.toggle("hidden", pk.length > 0);
+  if (!pk.length) { $("d-packets").innerHTML = ""; return; }
+  $("d-packets").innerHTML = "<tr><th>Time</th><th>Dir</th><th>Type</th><th>Device</th><th>FCnt</th><th>Freq</th><th>Data rate</th><th>RSSI</th><th>SNR</th><th>Size</th></tr>" +
+    pk.slice(0, 30).map((p) => {
+      const up = p.dir === "up";
+      const dev = p.dev_addr || (p.dev_eui ? "DevEUI " + p.dev_eui : "");
+      return `<tr><td>${iso(p.ts)}</td>
+        <td><span class="dir" style="background:var(--series-${up ? "up" : "down"})"></span>${up ? "Up" : "Down"}</td>
+        <td>${esc(p.mtype || "")}</td><td style="font-family:ui-monospace,Menlo,Consolas,monospace">${esc(dev)}</td>
+        <td>${p.fcnt ?? ""}</td><td>${p.freq ? Number(p.freq).toFixed(3) : ""}</td><td>${esc(p.datr || "")}</td>
+        <td>${up ? (p.rssi ?? "") : (p.power != null ? p.power + " dBm TX" : "")}</td><td>${p.snr ?? ""}</td><td>${p.size ?? ""}</td></tr>`;
+    }).join("");
+}
+
+// ---- chart: grouped bars, uplinks vs downlinks per hour
+function renderChartTable(series) {
+  $("chart-table").innerHTML = "<table><tr><th>Hour</th><th>Uplinks</th><th>Downlinks</th></tr>" +
+    series.slice().reverse().map((d) => `<tr><td>${shortDate(d.t)}</td><td>${d.up}</td><td>${d.down}</td></tr>`).join("") + "</table>";
+}
+function renderChart(series) {
+  renderChartTable(series);
+  const svg = $("chart-svg");
+  // While hidden (table view, or another tab) the chart has no width; drawing it then would
+  // bake in a fallback width. Skip, and draw when it is shown again.
+  const W = svg.clientWidth;
+  if (!W) return;
+  const H = 190, padL = 34, padR = 6, padT = 8, padB = 22;
+  const max = Math.max(4, ...series.map((d) => Math.max(d.up, d.down)));
+  const nice = (m) => { const p = Math.pow(10, Math.floor(Math.log10(m))); for (const k of [1, 2, 2.5, 5, 10]) if (k * p >= m) return k * p; return 10 * p; };
+  const top = nice(max), plotW = W - padL - padR, plotH = H - padT - padB;
+  const slot = plotW / series.length, bw = Math.max(2, Math.min(14, (slot - 4) / 2));
+  const y = (v) => padT + plotH - (v / top) * plotH;
+  let out = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = top * i / 4, yy = y(v);
+    out += `<line x1="${padL}" x2="${W - padR}" y1="${yy}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+    out += `<text x="${padL - 6}" y="${yy + 4}" text-anchor="end" font-size="10.5" fill="var(--muted)">${Math.round(v)}</text>`;
+  }
+  // 4px rounded data-ends, square at the baseline
+  const bar = (x, v, color) => {
+    if (!v) return "";
+    const yy = y(v), h = padT + plotH - yy, r = Math.min(4, bw / 2, h);
+    return `<path d="M${x},${padT + plotH} V${yy + r} Q${x},${yy} ${x + r},${yy} H${x + bw - r} Q${x + bw},${yy} ${x + bw},${yy + r} V${padT + plotH} Z" fill="${color}"/>`;
+  };
+  series.forEach((d, i) => {
+    const cx = padL + slot * i + slot / 2;
+    out += bar(cx - bw - 1, d.up, "var(--series-up)") + bar(cx + 1, d.down, "var(--series-down)");
+    const hr = tparts(d.t).hour;
+    if (hr % 3 === 0) out += `<text x="${cx}" y="${H - 6}" text-anchor="middle" font-size="10.5" fill="var(--muted)">${String(hr).padStart(2, "0")}:00</text>`;
+    out += `<rect x="${padL + slot * i}" y="${padT}" width="${slot}" height="${plotH}" fill="transparent" data-i="${i}"/>`;
+  });
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = out;
+  const tip = $("chart-tip");
+  svg.onmousemove = (e) => {
+    const i = e.target.dataset && e.target.dataset.i;
+    if (i === undefined) { tip.style.display = "none"; return; }
+    const d = series[i], t = tparts(d.t);
+    tip.innerHTML = `<b>${dayMonth(t)} ${t.h}:00–${String((t.hour + 1) % 24).padStart(2, "0")}:00</b><br>
+      <span class="dir" style="background:var(--series-up)"></span>Uplinks ${d.up}<br><span class="dir" style="background:var(--series-down)"></span>Downlinks ${d.down}`;
+    tip.style.display = "block";
+    const box = $("chart").getBoundingClientRect();
+    let x = e.clientX - box.left + 12; if (x + tip.offsetWidth > box.width) x = e.clientX - box.left - tip.offsetWidth - 12;
+    tip.style.left = x + "px"; tip.style.top = "10px";
+  };
+  svg.onmouseleave = () => { tip.style.display = "none"; };
+}
+$("chart-toggle").addEventListener("click", () => {
+  showTable = !showTable;
+  $("chart").classList.toggle("hidden", showTable);
+  $("chart-table").classList.toggle("hidden", !showTable);
+  $("chart-toggle").textContent = showTable ? "Show chart" : "Show table";
+  if (!showTable && STATUS) renderChart(STATUS.hourly);
+});
+window.addEventListener("resize", () => STATUS && tab === "dash" && renderChart(STATUS.hourly));
+
+// ---- LNS configuration
+const TTN = (c) => ({udp: {server: `${c}.cloud.thethings.network`, port_up: 1700, port_down: 1700},
+  basicstation: {lns: `wss://${c}.cloud.thethings.network:8887`, cups: `https://${c}.cloud.thethings.network:443`, auth: "token"}});
+const PRESETS = {
+  "ttn-eu1": {name: "The Things Network – Europe (eu1)", ...TTN("eu1"), region: "EU868"},
+  "ttn-nam1": {name: "The Things Network – North America (nam1)", ...TTN("nam1"), region: "US915", subband: 2},
+  "ttn-au1": {name: "The Things Network – Australia (au1)", ...TTN("au1"), region: "AU915", subband: 2},
+  "chirpstack": {name: "ChirpStack (self-hosted)", udp: {server: "", port_up: 1700, port_down: 1700},
+    basicstation: {lns: "ws://chirpstack.example.com:3001", cups: "", auth: "none"}, mqtt: {server: "tcp://chirpstack.example.com:1883"}},
+  "custom": {name: "Custom"},
+};
+function presetFor(cfg) {
+  const host = cfg.backend === "basicstation" ? cfg.basicstation.uri : cfg.backend === "mqtt" ? cfg.mqtt.server : cfg.udp.server;
+  const m = /(eu1|nam1|au1)\.cloud\.thethings\.network/.exec(host || "");
+  return m ? "ttn-" + m[1] : "custom";
+}
+function populateLns() {
+  const c = CFG;
+  $("preset").innerHTML = Object.entries(PRESETS).map(([k, p]) => `<option value="${k}">${esc(p.name)}</option>`).join("");
+  $("region").innerHTML = Object.entries(REGIONS).map(([k, v]) => `<option value="${k}">${esc(k)} – ${esc(v)}</option>`).join("");
+  $("subband").innerHTML = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `<option value="${i}">${i} (channels ${(i - 1) * 8}–${i * 8 - 1})</option>`).join("");
+  document.querySelectorAll("input[name=backend]").forEach((r) => (r.checked = r.value === c.backend));
+  $("preset").value = presetFor(c);
+  $("region").value = c.region; $("subband").value = c.subband || 2;
+  $("udp-server").value = c.udp.server; $("udp-up").value = c.udp.port_up; $("udp-down").value = c.udp.port_down;
+  const b = c.basicstation;
+  $("bs-mode").value = b.mode; $("bs-uri").value = b.uri; $("bs-auth").value = b.auth;
+  $("bs-token").value = b.token; $("bs-cert").value = b.cert; $("bs-key").value = ""; $("bs-trust").value = b.trust;
+  $("bs-key").placeholder = b.key ? "Stored. Paste a new key to replace it." : "";
+  const m = c.mqtt;
+  $("mq-server").value = m.server; $("mq-prefix").value = m.topic_prefix; $("mq-user").value = m.username;
+  $("mq-pass").value = m.password; $("mq-json").value = String(!!m.json);
+  $("mq-ca").value = m.ca_cert; $("mq-cert").value = m.tls_cert; $("mq-key").value = "";
+  $("mq-key").placeholder = m.tls_key ? "Stored. Paste a new key to replace it." : "";
+  $("eui").value = c.gateway_eui;
+  $("eui-hint").textContent = EUI_SOURCE === "chip"
+    ? "The unique ID of this gateway's LoRa concentrator chip. It can't be changed. Register exactly this EUI on your network server."
+    : "Derived from the Ethernet MAC address, because the concentrator chip's EUI could not be read during installation. Re-run install.sh to fix this. Register exactly this EUI on your network server.";
+  updateLnsVisibility();
+}
+function backendSel() { const r = document.querySelector("input[name=backend]:checked"); return r ? r.value : "none"; }
+function defaultPrefix() {
+  const r = $("region").value.toLowerCase();
+  return ["us915", "au915"].includes(r) ? `${r}_${Number($("subband").value) - 1}` : r;
+}
+function updateLnsVisibility() {
+  const b = backendSel();
+  document.querySelectorAll(".backend-fields").forEach((el) => el.classList.toggle("hidden", el.id !== "f-" + b));
+  $("lns-pick").classList.toggle("hidden", !["none", "monitor"].includes(b));
+  $("subband-wrap").classList.toggle("hidden", !["US915", "AU915"].includes($("region").value) || b === "basicstation");
+  $("lns-common").classList.toggle("hidden", ["none", "monitor"].includes(b));
+  const pr = PRESETS[$("preset").value];
+  const mismatch = pr && pr.region && pr.region !== $("region").value && !["none", "monitor"].includes(b)
+    ? `${pr.name} is meant for ${pr.region} gateways, but this gateway's region is ${$("region").value}. Check the server matches where the gateway is.` : "";
+  const base = "Must match the country the gateway is in." + (
+    b === "basicstation" ? " With Basics Station the network server sends the channel plan, so set the frequency plan there." :
+    b === "monitor" ? " The radio listens on these frequencies." :
+    b === "none" ? "" : " The radio receives and transmits on these frequencies.");
+  $("region-hint").textContent = [base, mismatch].filter(Boolean).join(" ");
+  $("region-hint").style.color = mismatch ? "var(--critical)" : "";
+  $("preset-wrap").classList.toggle("hidden", ["none", "monitor"].includes(b));
+  $("region").disabled = b === "basicstation";
+  $("bs-uri-label").textContent = $("bs-mode").value === "cups" ? "CUPS URI" : "LNS URI";
+  $("bs-token-wrap").classList.toggle("hidden", $("bs-auth").value !== "token");
+  $("bs-tls-wrap").classList.toggle("hidden", $("bs-auth").value !== "tls");
+}
+document.querySelectorAll("input[name=backend]").forEach((r) => r.addEventListener("change", () => { applyPreset(false); updateLnsVisibility(); }));
+["region", "subband", "bs-mode", "bs-auth"].forEach((id) => $(id).addEventListener("change", () => {
+  if (id === "bs-mode") applyPreset(false);
+  if ((id === "region" || id === "subband") && /^(eu868|us915_\d|au915_\d|as923|kr920|)$/.test($("mq-prefix").value)) $("mq-prefix").value = defaultPrefix();
+  updateLnsVisibility();
+}));
+$("preset").addEventListener("change", () => applyPreset(true));
+function applyPreset(setRegion) {
+  const p = PRESETS[$("preset").value];
+  if (!p || $("preset").value === "custom") return;
+  if (p.udp) { if (p.udp.server || setRegion) $("udp-server").value = p.udp.server; $("udp-up").value = p.udp.port_up; $("udp-down").value = p.udp.port_down; }
+  if (p.basicstation) {
+    const u = p.basicstation[$("bs-mode").value]; if (u) $("bs-uri").value = u;
+    if (setRegion) $("bs-auth").value = p.basicstation.auth;
+  }
+  if (p.mqtt && setRegion) $("mq-server").value = p.mqtt.server;
+  // Never change the region from a preset: the frequency plan must match the gateway's
+  // country, not the server. updateLnsVisibility() warns about a mismatch instead.
+  updateLnsVisibility();
+}
+$("lns-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const keep = (v, stored) => (v === "" && stored ? MASK : v);
+  const body = {
+    backend: backendSel(), region: $("region").value, subband: Number($("subband").value),
+    udp: {server: $("udp-server").value.trim(), port_up: Number($("udp-up").value), port_down: Number($("udp-down").value)},
+    basicstation: {mode: $("bs-mode").value, uri: $("bs-uri").value.trim(), auth: $("bs-auth").value, token: $("bs-token").value.trim(),
+      cert: $("bs-cert").value, key: keep($("bs-key").value, CFG.basicstation.key), trust: $("bs-trust").value},
+    mqtt: {server: $("mq-server").value.trim(), topic_prefix: $("mq-prefix").value.trim(), username: $("mq-user").value,
+      password: $("mq-pass").value, json: $("mq-json").value === "true", ca_cert: $("mq-ca").value, tls_cert: $("mq-cert").value,
+      tls_key: keep($("mq-key").value, CFG.mqtt.tls_key)},
+  };
+  const oldPlan = CFG.region + (["US915", "AU915"].includes(CFG.region) ? " sub-band " + CFG.subband : "");
+  const newPlan = body.region + (["US915", "AU915"].includes(body.region) ? " sub-band " + body.subband : "");
+  if (body.backend !== "basicstation" && body.backend !== "none" && oldPlan !== newPlan &&
+      !confirm(`Change the radio's frequency plan from ${oldPlan} to ${newPlan}?\n\nOnly use the plan for the country the gateway is in. Devices on another plan will not be heard.`)) return;
+  $("lns-save").disabled = true; setMsg($("lns-msg"), "Applying…");
+  try { await api("/api/config", body); setMsg($("lns-msg"), "Saved. The backend is restarting; watch the dashboard.", "ok"); await loadConfig(true); refresh(); }
+  catch (err) { setMsg($("lns-msg"), err.message, "err"); }
+  $("lns-save").disabled = false;
+});
+
+async function loadConfig(force) {
+  if (CFG && !force) { if (tab === "lns") populateLns(); return; }
+  const r = await api("/api/config");
+  CFG = r.config; HW = r.hw || {}; REGIONS = r.regions; EUI_SOURCE = r.eui_source || "chip";
+  populateLns();
+}
+
+// ---- network
+async function loadNetwork() {
+  try {
+    const n = await api("/api/network");
+    $("n-devs").innerHTML = "<tr><th>Interface</th><th>Type</th><th>State</th><th>Connection</th><th>IPv4</th><th>MAC</th></tr>" +
+      n.devices.map((d) => `<tr><td>${esc(d.device)}</td><td>${esc(d.type)}</td><td>${esc(d.state)}</td><td>${esc(d.connection)}</td><td>${esc(d.ipv4.join(", "))}</td><td>${esc(d.mac)}</td></tr>`).join("");
+  } catch (e) {}
+}
+// ---- tailscale
+let tsTimer = null, tsFormLoaded = false;
+const TS_STATE = {
+  connected: ["good", "Connected"], connecting: ["warning", "Connecting"], "needs-login": ["warning", "Waiting for login"],
+  "needs-approval": ["warning", "Waiting for approval in the admin console"], stopped: ["off", "Disconnected"],
+  starting: ["warning", "Starting"], "daemon-down": ["critical", "Tailscale service is not running"], "not-installed": ["off", "Not installed"]};
+async function loadTailscale() {
+  clearTimeout(tsTimer);
+  let t;
+  try { t = await api("/api/tailscale"); } catch (e) { return; }
+  const [lvl, txt] = TS_STATE[t.state] || ["off", t.state];
+  $("ts-status").innerHTML = statusBadge(lvl, txt) + (t.detail ? ` <span class="sub">${esc(t.detail)}</span>` : "");
+  const rows = [];
+  if (t.ips && t.ips.length) rows.push(["Tailscale IP", t.ips.join(", ")]);
+  if (t.dns_name) rows.push(["Name", t.dns_name]);
+  if (t.tailnet) rows.push(["Tailnet", t.tailnet]);
+  if (t.state === "connected") rows.push(["Peers", t.peers]);
+  if (t.mode) rows.push(["Mode", t.mode === "kernel" ? "Kernel TUN" : "Userspace networking"]);
+  if (t.web_urls && t.web_urls.length) rows.push(["Web UI over Tailscale", t.web_urls.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>`).join(" · ")]);
+  if (t.health && t.health.length) rows.push(["Warnings", t.health.join("; ")]);
+  $("ts-info").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${k === "Web UI over Tailscale" ? v : esc(v)}</dd>`).join("");
+  const login = $("ts-login");
+  if (t.auth_url && t.state === "needs-login") {
+    login.innerHTML = `Open this link to log in: <a href="${esc(t.auth_url)}" target="_blank" rel="noopener">${esc(t.auth_url)}</a>`;
+    login.classList.remove("hidden");
+  } else login.classList.add("hidden");
+  if (!tsFormLoaded) { $("ts-host").value = t.hostname; $("ts-host").placeholder = t.default_hostname || ""; $("ts-ssh").checked = t.ssh; tsFormLoaded = true; }
+  const on = t.installed;
+  ["ts-up", "ts-down", "ts-logout"].forEach((id) => ($(id).disabled = !on));
+  if (!on) setMsg($("ts-msg"), "Not installed. Re-run install.sh without --no-tailscale.", "err");
+  $("ts-down").disabled = !on || t.state === "stopped" || t.state === "needs-login";
+  if (tab === "net" && ["needs-login", "connecting", "starting"].includes(t.state)) tsTimer = setTimeout(loadTailscale, 3000);
+  else if (tab === "net") tsTimer = setTimeout(loadTailscale, 15000);
+}
+async function tsAction(action, extra) {
+  setMsg($("ts-msg"), "Working…");
+  try {
+    const r = await api("/api/action", Object.assign({action}, extra || {}));
+    setMsg($("ts-msg"), r.message || "Done.", "ok"); $("ts-key").value = "";
+  } catch (err) { setMsg($("ts-msg"), err.message, "err"); }
+  loadTailscale();
+}
+$("ts-up").addEventListener("click", () => tsAction("ts_up", {hostname: $("ts-host").value.trim(), ssh: $("ts-ssh").checked, authkey: $("ts-key").value.trim()}));
+$("ts-down").addEventListener("click", () => tsAction("ts_down"));
+$("ts-logout").addEventListener("click", () => { if (confirm("Log this gateway out of Tailscale? It will need a new login to reconnect.")) tsAction("ts_logout"); });
+
+// ---- system
+async function loadSystem() {
+  try {
+    const s = await api("/api/system");
+    const v = s.versions || {};
+    $("s-info").innerHTML = [["Hostname", s.hostname], ["Uptime", s.uptime ? dur(s.uptime) : ""], ["Load", (s.load || []).join(" ")],
+      ["CPU temperature", s.cpu_temp != null ? s.cpu_temp + " °C" : ""], ["Memory", s.mem ? `${s.mem.used_mb} / ${s.mem.total_mb} MB` : ""],
+      ["SD card", s.disk ? `${s.disk.used_gb} / ${s.disk.total_gb} GB` : ""], ["Time synced", s.time_synced ? "Yes" : "No (NTP)"],
+      ["bobcat-gw", s.version], ...Object.entries(v)].map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`).join("");
+    const h = s.holds;
+    $("s-holds").innerHTML = (h.missing.length
+      ? `<p>${statusBadge("critical", "Not protected")}</p><p class="sub">These packages are not held, so an upgrade could replace the Bobcat kernel, device tree or bootloader and stop the gateway from booting: <b>${esc(h.missing.join(", "))}</b>.</p><p class="sub">Fix: <code>sudo apt-mark hold ${esc(h.missing.join(" "))}</code></p>`
+      : `<p>${statusBadge("good", "Protected")}</p><p class="sub">The kernel, device tree and bootloader are held back, so <code>apt upgrade</code> is safe.</p>`) +
+      `<p class="sub muted" style="margin-bottom:0">Held: ${esc(h.held.join(", ") || "none")}</p>`;
+  } catch (e) {}
+  if (STATUS) renderServices(STATUS);
+}
+async function loadTimezones() {
+  try {
+    const r = await api("/api/timezones");
+    TZ = r.timezone;
+    const zones = r.timezones.length ? r.timezones : [r.timezone];
+    $("tz-sel").innerHTML = zones.map((z) => `<option${z === r.timezone ? " selected" : ""}>${esc(z)}</option>`).join("");
+    setMsg($("tz-msg"), "Now " + iso(Date.now() / 1000), "");
+  } catch (e) { setMsg($("tz-msg"), e.message, "err"); }
+}
+$("tz-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const r = await api("/api/timezone", {timezone: $("tz-sel").value});
+    TZ = r.timezone;
+    setMsg($("tz-msg"), "Saved. Now " + iso(Date.now() / 1000), "ok");
+    refresh();
+  } catch (err) { setMsg($("tz-msg"), err.message, "err"); }
+});
+function renderServices(s) {
+  $("s-services").innerHTML = Object.entries(s.services).map(([k, v]) =>
+    `<dt>${esc({pktfwd: "Packet forwarder", station: "Basics Station", mqtt: "MQTT forwarder"}[k])}</dt><dd>${statusBadge(v.state === "active" ? "good" : v.state === "failed" ? "critical" : "off", v.state)}${v.restarts ? " · " + v.restarts + " restarts" : ""}</dd>`).join("");
+}
+async function loadLog() {
+  try { const r = await api("/api/logs?n=400&unit=" + $("log-unit").value); $("log").textContent = r.log || "(empty)"; $("log").scrollTop = 1e9; }
+  catch (err) { $("log").textContent = err.message; }
+}
+$("log-unit").addEventListener("change", loadLog);
+$("log-refresh").addEventListener("click", loadLog);
+$("s-restart").addEventListener("click", async () => {
+  setMsg($("s-msg"), "Restarting…");
+  try { await api("/api/action", {action: "restart"}); setMsg($("s-msg"), "Restarted.", "ok"); refresh(); } catch (err) { setMsg($("s-msg"), err.message, "err"); }
+});
+$("pw-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try { await api("/api/password", {current: $("pw-cur").value, new: $("pw-new").value}); setMsg($("pw-msg"), "Password changed.", "ok"); $("pw-cur").value = $("pw-new").value = ""; }
+  catch (err) { setMsg($("pw-msg"), err.message, "err"); }
+});
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+
+start();
+</script>
+</body>
+</html>

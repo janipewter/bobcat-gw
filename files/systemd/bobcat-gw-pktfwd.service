@@ -1,0 +1,18 @@
+[Unit]
+Description=bobcat-gw Semtech packet forwarder (SX1302)
+After=network-online.target time-sync.target
+Wants=network-online.target
+Conflicts=bobcat-gw-station.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/var/lib/bobcat-gw/pktfwd
+# lora_pkt_fwd runs ./reset_lgw.sh itself; stdbuf makes its output reach the journal immediately
+ExecStart=/usr/bin/stdbuf -oL -eL /opt/bobcat-gw/bin/lora_pkt_fwd -c global_conf.json
+Restart=always
+RestartSec=10
+LogRateLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

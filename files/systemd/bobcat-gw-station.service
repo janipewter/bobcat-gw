@@ -1,0 +1,18 @@
+[Unit]
+Description=bobcat-gw LoRa Basics Station (SX1302)
+After=network-online.target time-sync.target
+Wants=network-online.target
+Conflicts=bobcat-gw-pktfwd.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/var/lib/bobcat-gw/station
+ExecStart=/opt/bobcat-gw/bin/station --home /var/lib/bobcat-gw/station
+ExecStopPost=/opt/bobcat-gw/bin/reset_lgw.sh stop
+Restart=always
+RestartSec=10
+LogRateLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target
