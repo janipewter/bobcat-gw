@@ -30,7 +30,7 @@ import time
 import urllib.parse
 import urllib.request
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 APP_DIR = os.environ.get("BOBCAT_GW_APP", "/opt/bobcat-gw")
 CONF_DIR = os.environ.get("BOBCAT_GW_CONF", "/etc/bobcat-gw")
