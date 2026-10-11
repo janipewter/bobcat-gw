@@ -107,6 +107,7 @@ qemu-aarch64 -L "$SYSROOT" "$OUT/station" --version 2>&1 | head -3 | sed 's/^/  
     echo "built: $(date -u +%Y-%m-%dT%H:%M:%SZ) on $(. /etc/os-release; echo "$PRETTY_NAME")"
     echo "sx1302_hal: $HAL_VERSION (patched for no temperature sensor)"
     echo "basicstation: $STATION_VERSION (patched for no temperature sensor)"
+    echo "licences: see THIRD_PARTY_NOTICES.md"
     echo "sysroot libc: ${LIBC_VER:-unknown} (Debian $DEBIAN_SUITE)"
     (cd "$OUT" && sha256sum lora_pkt_fwd chip_id station)
 } > "$OUT/BUILDINFO"

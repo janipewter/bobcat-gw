@@ -1,6 +1,7 @@
 built: 2026-10-09T22:40:53Z on Ubuntu 24.04.2 LTS
 sx1302_hal: V2.1.0 (patched for no temperature sensor)
 basicstation: v2.0.6 (patched for no temperature sensor)
+licences: see THIRD_PARTY_NOTICES.md
 sysroot libc: 2.36-9+deb12u14 (Debian bookworm)
 2287c6d3e03e097c68b22d3f349be06cfdcc816384c6c907709dd2e2923aa911  lora_pkt_fwd
 ef7147aadd3d30b88bc22f8c60cd96c40cbf6590b177603513ea3024b16e878f  chip_id
