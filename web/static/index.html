@@ -453,11 +453,13 @@ body.login-mode { background:
   <section id="sys">
     <div class="stack">
       <div class="grid">
-        <div class="card"><h3>System</h3><dl class="kv" id="s-info"></dl>
-          <div class="sub" id="upd-status" style="margin-top:12px"></div>
+        <div class="card"><h3>System</h3><dl class="kv" id="s-info"></dl></div>
+        <div class="card"><h3>Updates</h3>
+          <dl class="kv"><dt>bobcat-gw</dt><dd id="upd-ver"></dd></dl>
+          <div class="sub" id="upd-status" style="margin-top:8px"></div>
           <div class="actions"><button class="btn" id="upd-check">Check now</button><button class="btn primary" id="upd-go" hidden>Update…</button></div>
+          <h3 style="margin-top:22px">Boot safety (package holds)</h3><div id="s-holds"></div>
         </div>
-        <div class="card"><h3>Boot safety (package holds)</h3><div id="s-holds"></div></div>
         <form class="card" id="tz-form">
           <h3>Time</h3>
           <div id="time-status" class="sub">Checking…</div>
@@ -1105,7 +1107,8 @@ async function loadSystem() {
     $("s-info").innerHTML = [["Hostname", s.hostname], ["Uptime", uptime], ["Load", (s.load || []).join(" ")],
       ["CPU temperature", s.cpu_temp != null ? s.cpu_temp + " °C" : ""], ["Memory", s.mem ? `${s.mem.used_mb} / ${s.mem.total_mb} MB` : ""],
       ["SD card", s.disk ? `${s.disk.used_gb} / ${s.disk.total_gb} GB` : ""],
-      ["bobcat-gw", s.version], ...Object.entries(v)].map(([k, val]) => `<dt>${esc(k)}</dt><dd>${k === "Uptime" ? val : esc(val)}${k === "Hostname" ? `<button type="button" class="link-btn" id="host-edit">Change</button>` : ""}</dd>`).join("");
+      ...Object.entries(v)].map(([k, val]) => `<dt>${esc(k)}</dt><dd>${k === "Uptime" ? val : esc(val)}${k === "Hostname" ? `<button type="button" class="link-btn" id="host-edit">Change</button>` : ""}</dd>`).join("");
+    $("upd-ver").textContent = s.version;
     const h = s.holds;
     $("s-holds").innerHTML = (h.missing.length
       ? `<p>${statusBadge("critical", "Not protected")}</p><p class="sub">These packages are not held, so an upgrade could replace the Bobcat kernel, device tree or bootloader and stop the gateway from booting: <b>${esc(h.missing.join(", "))}</b>.</p><p class="sub">Fix: <code>sudo apt-mark hold ${esc(h.missing.join(" "))}</code></p>`
@@ -1261,9 +1264,9 @@ async function loadUpdate(force) {
   const checked = UPD.checked ? ` · checked ${live("ago", UPD.checked)}` : "";
   if (UPD.error) el.innerHTML = esc(UPD.error) + checked;
   else if (UPD.available) {
-    el.innerHTML = `Version <b>${esc(UPD.latest)}</b> is available (installed: ${esc(UPD.current)}). <a href="${esc(UPD.url)}" target="_blank" rel="noopener">What's new</a>`;
+    el.innerHTML = `<b>${esc(UPD.latest)}</b> is available. <a href="${esc(UPD.url)}" target="_blank" rel="noopener">What's new</a>`;
     go.textContent = `Update to ${UPD.latest}…`;
-  } else el.innerHTML = `bobcat-gw is up to date (${esc(UPD.current)})${checked}`;
+  } else el.innerHTML = `Up to date${checked}`;
 }
 $("upd-check").addEventListener("click", () => loadUpdate(true));
 $("hdr-update").addEventListener("click", () => go("sys"));
