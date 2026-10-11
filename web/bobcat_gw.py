@@ -3,8 +3,8 @@
 
 Single process, standard library only. It
   * owns the gateway configuration (/etc/bobcat-gw/config.json),
-  * renders the configuration of the active backend (Semtech UDP packet
-    forwarder, LoRa Basics Station, or ChirpStack MQTT Forwarder),
+  * renders the configuration of the active backend (LoRa Basics Station,
+    Semtech UDP packet forwarder, or ChirpStack MQTT Forwarder),
   * starts/stops the backend systemd units,
   * follows the backend journals to collect gateway statistics,
   * reports the network interfaces (Ethernet only: the onboard BCM43430 WiFi is
@@ -40,14 +40,14 @@ WEB_PORT = int(os.environ.get("BOBCAT_GW_PORT", "80"))
 SYSTEM_CA = "/etc/ssl/certs/ca-certificates.crt"
 
 UNITS = {
+    "station": "bobcat-gw-station.service",
     "pktfwd": "bobcat-gw-pktfwd.service",
     "mqtt": "bobcat-gw-mqtt.service",
-    "station": "bobcat-gw-station.service",
 }
 BACKEND_UNITS = {
+    "basicstation": ["station"],
     "udp": ["pktfwd"],
     "mqtt": ["pktfwd", "mqtt"],
-    "basicstation": ["station"],
     "monitor": ["pktfwd"],  # receive and display only; nothing is forwarded to an LNS
     "none": [],
 }
@@ -81,8 +81,14 @@ DEFAULT_CONFIG = {
         "tls_key": "",
     },
     "tailscale": {"hostname": "", "ssh": False},
-    "web": {"password_hash": ""},
+    # must_change: still on the default password (DEFAULT_PASSWORD); the web UI only lets you
+    # change it until then. An empty hash means the default password too.
+    "web": {"password_hash": "", "must_change": False},
 }
+
+# Default password of a fresh image, for the web UI and root. It is shorter than the 8
+# characters required of every password a user chooses: the web UI makes you change it first.
+DEFAULT_PASSWORD = "bobcat"
 
 SECRET_FIELDS = [
     ("basicstation", "token"), ("basicstation", "key"),
@@ -522,17 +528,24 @@ def hardware_eui(hw):
 
 
 def decode_phy(data_b64):
-    """Pull the identifying fields out of a LoRaWAN PHYPayload."""
+    """Pull the identifying fields out of a base64 LoRaWAN PHYPayload."""
     try:
-        b = base64.b64decode(data_b64)
+        return decode_phy_bytes(base64.b64decode(data_b64))
     except (ValueError, TypeError):
         return {}
+
+
+# LoRaWAN MHDR message types, as shown in the web UI
+MTYPE_NAMES = {0: "Join request", 1: "Join accept", 2: "Unconfirmed up", 3: "Unconfirmed down",
+               4: "Confirmed up", 5: "Confirmed down", 6: "Rejoin request", 7: "Proprietary"}
+
+
+def decode_phy_bytes(b):
+    """Message type, and DevAddr/FCnt or the join EUIs, from the start of a PHYPayload."""
     if not b:
         return {}
     mtype = b[0] >> 5
-    names = {0: "JoinRequest", 1: "JoinAccept", 2: "UnconfirmedUp", 3: "UnconfirmedDown",
-             4: "ConfirmedUp", 5: "ConfirmedDown", 6: "RejoinRequest", 7: "Proprietary"}
-    out = {"mtype": names.get(mtype, "?")}
+    out = {"mtype": MTYPE_NAMES.get(mtype, "?")}
     if mtype == 0 and len(b) >= 23:
         out["join_eui"] = b[1:9][::-1].hex().upper()
         out["dev_eui"] = b[9:17][::-1].hex().upper()
@@ -609,7 +622,8 @@ class Totals:
         self.since = d.get("since")
         self.marks = d.get("marks") or {}
         b = d.get("boot") or {}
-        self.boot = b if b.get("id") == BOOT_ID else {"id": BOOT_ID, "up": 0, "down": 0}
+        fresh = {"id": BOOT_ID, "up": 0, "down": 0}
+        self.boot = dict(fresh, **b) if BOOT_ID and b.get("id") == BOOT_ID else fresh
         self.dirty = False
         self.saved = time.monotonic()
 
@@ -683,22 +697,32 @@ class Stats:
         for k in [k for k in self.hourly if k < cutoff]:
             del self.hourly[k]
 
+    def _this_boot(self):
+        """Whether the journal entry being parsed is from the current boot. The journal is
+        kept on disk and the replay covers 24 h, so it also holds earlier boots: those count
+        towards the totals and the chart, but not the recent packets and warnings lists."""
+        boot = self._entry[0]
+        return not BOOT_ID or not boot or boot == BOOT_ID
+
     def event(self, ts, unit, level, msg):
-        self.events.appendleft({"ts": ts, "unit": unit, "level": level, "msg": msg[:300]})
+        if self._this_boot():
+            self.events.appendleft({"ts": ts, "unit": unit, "level": level, "msg": msg[:300]})
 
     def uplink(self, ts, unit, **pkt):
         pkt.update({"ts": ts, "dir": "up", "unit": unit})
-        self.packets.appendleft(pkt)
-        self.counters["uplinks"] += 1
-        self.counters["last_uplink"] = ts
+        if self._this_boot():
+            self.packets.appendleft(pkt)
+            self.counters["uplinks"] += 1
+            self.counters["last_uplink"] = ts
         self.totals.count("up", ts, *self._entry)
         self._bucket(ts, 0)
 
     def downlink(self, ts, unit, **pkt):
         pkt.update({"ts": ts, "dir": "down", "unit": unit})
-        self.packets.appendleft(pkt)
-        self.counters["downlinks"] += 1
-        self.counters["last_downlink"] = ts
+        if self._this_boot():
+            self.packets.appendleft(pkt)
+            self.counters["downlinks"] += 1
+            self.counters["last_downlink"] = ts
         self.totals.count("down", ts, *self._entry)
         self._bucket(ts, 1)
 
@@ -739,13 +763,13 @@ class Stats:
         src = self.sources[key]
         if msg.startswith("Started"):
             src.set("starting", "", ts)
-            if key in ("pktfwd", "station"):
+            if key in ("station", "pktfwd"):
                 self.concentrator.update(state="starting", detail="", since=ts)
         elif msg.startswith(("Stopped", "Deactivated")) or "Failed with result" in msg \
                 or "Main process exited" in msg:
             if src.state != "stopped":
                 src.set("stopped", msg if "Failed" in msg or "exited" in msg else "", ts)
-            if key in ("pktfwd", "station"):
+            if key in ("station", "pktfwd"):
                 self.concentrator.update(state="stopped", detail="", since=ts)
 
     PF_ACK = re.compile(r"\[(up|down)\] (PUSH|PULL)_ACK received in (\d+) ms")
@@ -799,7 +823,7 @@ class Stats:
 
     def _pktfwd_stat(self, s):
         nums = [float(x) for x in self.PF_NUM.findall(s)]
-        if not nums:
+        if not nums or not self._this_boot():  # counters cover the current boot only
             return
         c = self.counters
         if s.startswith("RF packets received by concentrator"):
@@ -824,7 +848,7 @@ class Stats:
 
     ST_LINE = re.compile(r"\[(\w{3}):(\w{4})\] (.*)$")
     ST_RX = re.compile(r"^RX ([\d.]+)MHz DR(\d+) (\S+) snr=(-?[\d.]+) rssi=(-?\d+) \S+ - (\w+)(.*)$")
-    ST_TX = re.compile(r"^TX .* - (\w+): ([\d.]+)MHz ([\d.]+)dBm \S+ DR(\d+) (\S+) frame=\S+ \((\d+) bytes\)")
+    ST_TX = re.compile(r"^TX .* - (\w+): ([\d.]+)MHz ([\d.]+)dBm \S+ DR(\d+) (\S+) frame=(\S+) \((\d+) bytes\)")
 
     def _station(self, line, ts):
         m = self.ST_LINE.search(line)
@@ -843,17 +867,30 @@ class Stats:
                 if mm:
                     v = mm.group(1)
                     info[k] = int(v) if k in ("fcnt", "size") else v.replace(":", "").replace("-", "").upper()
-            mt = {"updf": "Uplink", "jreq": "JoinRequest", "propdf": "Proprietary"}.get(mtype, mtype)
+            mh = re.search(r"mhdr=([0-9A-Fa-f]{1,2})", rest)
+            if mh:
+                mt = MTYPE_NAMES.get(int(mh.group(1), 16) >> 5, mtype)
+            else:
+                mt = {"updf": "Uplink", "jreq": "Join request", "propdf": "Proprietary"}.get(mtype, mtype)
             self.uplink(ts, "station", freq=float(freq), datr=f"DR{dr} {rps}", rssi=int(rssi),
                         snr=float(snr), mtype=mt, **info)
-            self.counters["rx_forwarded"] += 1
+            if self._this_boot():
+                self.counters["rx_forwarded"] += 1
             return
         tx = self.ST_TX.match(text)
         if tx:
-            kind, freq, power, dr, rps, size = tx.groups()
+            kind, freq, power, dr, rps, frame, size = tx.groups()
+            # "dntxed" is Basics Station's "downlink transmitted" report. The log has the
+            # frame in hex (long frames shortened to "<start>..<end>"); the start is enough
+            # for the message type, DevAddr and FCnt.
+            info = {"mtype": "Downlink"}
+            head = frame.split("..")[0]
+            if re.fullmatch(r"(?:[0-9A-Fa-f]{2})+", head or "x"):
+                info.update(decode_phy_bytes(bytes.fromhex(head)))
             self.downlink(ts, "station", freq=float(freq), datr=f"DR{dr} {rps}",
-                          power=float(power), size=int(size), mtype=kind)
-            self.counters["tx_requested"] += 1
+                          power=float(power), size=int(size), **info)
+            if self._this_boot():
+                self.counters["tx_requested"] += 1
             return
         if "Connected to MUXS" in text:
             src.last_ok = ts
@@ -904,7 +941,7 @@ class Stats:
             if unit_states.get("pktfwd") != "active":
                 return {"state": "stopped", "detail": "Service is %s." % unit_states.get("pktfwd", "inactive")}
             return {"state": "monitor", "detail": "Monitor only: packets are received and shown here, but nothing is forwarded to any LNS."}
-        key = {"udp": "pktfwd", "mqtt": "mqtt", "basicstation": "station"}[backend]
+        key = {"basicstation": "station", "udp": "pktfwd", "mqtt": "mqtt"}[backend]
         src = self.sources[key]
         active = unit_states.get(key) == "active"
         if not active:
@@ -984,7 +1021,7 @@ class JournalFollower(threading.Thread):
         # time and this whole boot by boot ID instead.
         if BOOT_ID and time.monotonic() < 86400:
             self._stream(["--since", "-24h"] + units, follow=False, skip_this_boot=True)
-            args = ["-b"]
+            args = ["-b", "--lines=all"]  # with -f, journalctl otherwise shows only the last 10 lines
         else:
             args = ["--since", "-24h"]
         while True:
@@ -1244,6 +1281,104 @@ def set_timezone(tz):
     os.sync()  # the board has hung without warning before; get /etc/localtime onto the card
 
 
+def time_status():
+    """Clock sync status from chrony (the installer sets it up)."""
+    out = {"timezone": current_timezone(), "daemon": None, "synced": False, "servers": []}
+    rc, track = run(["chronyc", "-c", "tracking"], timeout=10)
+    if rc != 0:
+        return out
+    out["daemon"] = "chrony"
+    rc, src = run(["chronyc", "-c", "sources"], timeout=10)
+    rc, named = run(["chronyc", "-c", "-N", "sources"], timeout=10)
+    names = {}
+    for a, b in zip(src.splitlines(), named.splitlines()):
+        fa, fb = a.split(","), b.split(",")
+        if len(fa) > 2 and len(fb) > 2:
+            names[fa[2]] = fb[2]
+    for line in src.splitlines():
+        f = line.split(",")
+        if len(f) < 10:
+            continue
+        try:
+            out["servers"].append({"name": names.get(f[2], f[2]), "state": f[1], "stratum": int(f[3]),
+                                   "poll_s": 2 ** int(f[4]), "reach": int(f[5], 8),
+                                   "offset_ms": round(float(f[7]) * 1000, 3)})
+        except ValueError:
+            continue
+    f = track.strip().split(",")
+    if len(f) >= 14:
+        try:
+            out.update({"source": names.get(f[1], f[1]), "stratum": int(f[2]), "ref_time": float(f[3]),
+                        "offset_ms": round(float(f[4]) * 1000, 3), "update_interval_s": float(f[12]),
+                        "leap": f[13]})
+        except ValueError:
+            pass
+        out["synced"] = f[13] != "Not synchronised" and f[0] not in ("00000000", "7F7F0101")
+    return out
+
+
+SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]{40,}( [^\r\n]{0,200})?$")
+AUTH_KEYS = "/root/.ssh/authorized_keys"
+
+
+def ssh_status():
+    rc, active = run(["systemctl", "is-active", "ssh"], timeout=10)
+    rc, enabled = run(["systemctl", "is-enabled", "ssh"], timeout=10)
+    pw_set = False
+    try:
+        for line in open("/etc/shadow"):
+            if line.startswith("root:"):
+                field = line.split(":")[1]
+                pw_set = bool(field) and field[0] not in "!*"
+    except OSError:
+        pass
+    try:
+        keys = sum(1 for l in open(AUTH_KEYS) if l.strip() and not l.startswith("#"))
+    except OSError:
+        keys = 0
+    return {"active": active.strip() == "active", "enabled": enabled.strip() == "enabled",
+            "root_password": pw_set, "keys": keys}
+
+
+def must_change():
+    """Still on the default password: the web UI allows nothing but changing it."""
+    w = APP.store.get()["web"]
+    return bool(w.get("must_change")) or not w.get("password_hash")
+
+
+def set_root_password(password):
+    """root's password follows the web UI password. Returns True if it was set."""
+    try:
+        p = subprocess.run(["chpasswd"], input=f"root:{password}\n", text=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if p.returncode == 0:
+        os.sync()
+    return p.returncode == 0
+
+
+def ssh_enable(key):
+    """Turn SSH on. root logs in with the web UI password (kept in sync) and/or a key."""
+    key = (key or "").strip()
+    st = ssh_status()
+    if key and not SSH_KEY_RE.match(key):
+        raise ValueError("That doesn't look like an SSH public key (ssh-ed25519 AAAA... or similar).")
+    if not (key or st["root_password"] or st["keys"]):
+        raise ValueError("root has no password yet. Change the web UI password first, or add a public key.")
+    if key:
+        os.makedirs("/root/.ssh", mode=0o700, exist_ok=True)
+        existing = open(AUTH_KEYS).read() if os.path.exists(AUTH_KEYS) else ""
+        if key not in existing:
+            with open(AUTH_KEYS, "a") as f:
+                f.write(("" if not existing or existing.endswith("\n") else "\n") + key + "\n")
+        os.chmod(AUTH_KEYS, 0o600)
+    os.sync()
+    rc, out = run(["systemctl", "enable", "--now", "ssh"], timeout=60)
+    if rc != 0:
+        raise RuntimeError("Could not start SSH: " + out.strip()[:160])
+
+
 def system_info(hw):
     info = {"hostname": os.uname().nodename, "version": VERSION, "versions": hw.get("versions", {})}
     try:
@@ -1399,8 +1534,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return None
 
     def authed(self):
-        if not APP.store.get()["web"].get("password_hash"):
-            return True
+        # Signing in always needs a password: the default one (see DEFAULT_PASSWORD) until it
+        # is changed, and must_change() then limits the session to changing it.
         return self.session() is not None
 
     def read_json(self):
@@ -1424,9 +1559,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not path.startswith("/api/"):
             return self.redirect("/")
         if path == "/api/session":
-            return self.send_json({"authenticated": self.authed(), "hostname": os.uname().nodename})
+            return self.send_json({"authenticated": self.authed(), "hostname": os.uname().nodename,
+                                   "must_change": must_change()})
         if not self.authed():
             return self.send_json({"error": "unauthorized"}, 401)
+        if must_change():
+            return self.send_json({"error": "Change the default password first.", "must_change": True}, 403)
         q = urllib.parse.parse_qs(url.query)
         if path == "/api/status":
             return self.send_json(APP.status())
@@ -1440,6 +1578,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json(APP.ts.status())
         if path == "/api/system":
             return self.send_json(system_info(APP.hw))
+        if path == "/api/ssh":
+            return self.send_json(ssh_status())
+        if path == "/api/time":
+            return self.send_json(time_status())
         if path == "/api/timezones":
             return self.send_json({"timezones": list_timezones(), "timezone": current_timezone()})
         if path == "/api/logs":
@@ -1469,6 +1611,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json({"ok": True}, headers={"Set-Cookie": "bgw_session=; Max-Age=0; Path=/"})
         if not self.authed():
             return self.send_json({"error": "unauthorized"}, 401)
+        if must_change() and path != "/api/password":
+            return self.send_json({"error": "Change the default password first.", "must_change": True}, 403)
         try:
             if path == "/api/config":
                 return self.save_config(body)
@@ -1494,12 +1638,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if len(recent) >= 5:
             return self.send_json({"error": "Too many attempts, wait a minute."}, 429)
         stored = APP.store.get()["web"].get("password_hash", "")
-        if stored and not check_password(str(body.get("password", "")), stored):
+        given = str(body.get("password", ""))
+        if not (check_password(given, stored) if stored else hmac.compare_digest(given, DEFAULT_PASSWORD)):
             APP.login_failures.append(now)
             time.sleep(1)
             return self.send_json({"error": "Wrong password."}, 403)
+        self.start_session()
+
+    def start_session(self):
         tok = secrets.token_urlsafe(24)
-        APP.sessions[tok] = now + SESSION_TTL
+        APP.sessions[tok] = time.time() + SESSION_TTL
         cookie = f"bgw_session={tok}; Max-Age={SESSION_TTL}; Path=/; HttpOnly; SameSite=Strict"
         self.send_json({"ok": True}, headers={"Set-Cookie": cookie})
 
@@ -1512,7 +1660,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         old = APP.store.get()
         # gateway_eui is not accepted: it is fixed to the concentrator's EUI (see hardware_eui)
         new = deep_merge(old, {k: body[k] for k in ("region", "subband", "backend",
-                                                     "udp", "basicstation", "mqtt") if k in body})
+                                                     "basicstation", "udp", "mqtt") if k in body})
         self.merge_secrets(new, old)
         try:
             new["subband"] = int(new.get("subband", 2))
@@ -1527,17 +1675,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_json({"ok": True})
 
     def change_password(self, body):
+        forced = must_change()
         stored = APP.store.get()["web"].get("password_hash", "")
-        if stored and not check_password(str(body.get("current", "")), stored):
+        # A forced change follows a sign-in with the default password: no need to ask again.
+        if not forced and stored and not check_password(str(body.get("current", "")), stored):
             return self.send_json({"error": "Current password is wrong."}, 403)
         pw = str(body.get("new", ""))
         if len(pw) < 8:
             return self.send_json({"error": "Use at least 8 characters."}, 400)
+        if pw == DEFAULT_PASSWORD:
+            return self.send_json({"error": "Choose a password other than the default."}, 400)
         cfg = APP.store.get()
         cfg["web"]["password_hash"] = hash_password(pw)
+        cfg["web"]["must_change"] = False
         APP.store.save(cfg)
+        root = set_root_password(pw)   # root's (SSH) password follows the web UI password
         APP.sessions = {self.session(): time.time() + SESSION_TTL} if self.session() else {}
-        self.send_json({"ok": True})
+        self.send_json({"ok": True, "root_password_synced": root})
 
     def action(self, body):
         a = body.get("action")
@@ -1548,6 +1702,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 run(["systemctl", "restart"] + units, timeout=90)
             APP._units_time = 0
             return self.send_json({"ok": True})
+        if a == "reboot":
+            # Reply first, then reboot. A plain warm reboot is safe now that the WiFi
+            # driver, which used to hang the board while starting, is disabled.
+            def later():
+                time.sleep(1)
+                os.sync()
+                run(["systemctl", "reboot"], timeout=30)
+            threading.Thread(target=later, daemon=True).start()
+            return self.send_json({"ok": True})
+        if a == "ssh_enable":
+            try:
+                ssh_enable(body.get("key", ""))
+            except (ValueError, RuntimeError) as e:
+                return self.send_json({"error": str(e)}, 400)
+            return self.send_json({"ok": True, **ssh_status()})
+        if a == "ssh_disable":
+            run(["systemctl", "disable", "--now", "ssh"], timeout=60)
+            return self.send_json({"ok": True, **ssh_status()})
         if a in ("ts_up", "ts_down", "ts_logout"):
             try:
                 if a == "ts_up":
@@ -1602,6 +1774,13 @@ def init_config():
     pw = os.environ.get("BOBCAT_GW_PASSWORD")
     if pw:
         cfg["web"]["password_hash"] = hash_password(pw)
+        cfg["web"]["must_change"] = False
+        set_root_password(pw)
+    elif os.environ.get("BOBCAT_GW_DEFAULT_PASSWORD"):
+        # ready-made image: default password for the web UI and root, changed on first login
+        cfg["web"]["password_hash"] = hash_password(DEFAULT_PASSWORD)
+        cfg["web"]["must_change"] = True
+        set_root_password(DEFAULT_PASSWORD)
     errors = validate(cfg)
     if errors:
         print("Configuration problems (fix them in the web UI): " + " ".join(errors))

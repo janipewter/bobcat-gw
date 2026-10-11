@@ -1,11 +1,12 @@
 #!/bin/bash
 # bobcat-gw installer: turns a Bobcat 300 G285 running Armbian into a LoRaWAN
-# gateway with a web UI. Supports Semtech UDP, LoRa Basics Station and MQTT
+# gateway with a web UI. Supports LoRa Basics Station, the Semtech UDP packet forwarder and MQTT
 # (ChirpStack MQTT Forwarder). Ethernet only: the onboard WiFi is disabled.
 #
 # Inspired by https://github.com/AdvdLaar/Bobcat300-TTN
 #
-# Usage: sudo ./install.sh [--password <web-ui-password>] [--rebuild] [--build-on-device] [--force] [--no-tailscale]
+# Usage: sudo ./install.sh [--password <password> | --default-password] [--rebuild] [--build-on-device] [--force] [--no-tailscale]
+#    or: curl -fsSL https://raw.githubusercontent.com/OWNER/bobcat-gw/main/install.sh | sudo bash -s -- [options]
 set -euo pipefail
 
 VERSION="0.1.0"
@@ -24,14 +25,17 @@ MQF_URL="https://artifacts.chirpstack.io/packages/4.x/deb/pool/main/c/chirpstack
 
 SPI_DEV="${SPI_DEV:-/dev/spidev1.0}"
 WEB_PASSWORD=""
+DEFAULT_PW=0    # default password bobcat for the web UI and root, changed on first login
 REBUILD=0
 BUILD_ON_DEVICE=0
 FORCE=0
 TAILSCALE=1
 
+ARGS=("$@")   # kept for re-running the installer: the loop below consumes "$@"
 while [ $# -gt 0 ]; do
     case "$1" in
         --password) WEB_PASSWORD="$2"; shift 2 ;;
+        --default-password) DEFAULT_PW=1; shift ;;
         --rebuild)  REBUILD=1; shift ;;
         --build-on-device) BUILD_ON_DEVICE=1; shift ;;
         --force)    FORCE=1; shift ;;
@@ -43,6 +47,33 @@ done
 
 step() { echo; echo "==> $*"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
+
+# ------------------------------------------------------------------
+# One-line install: `curl -fsSL <raw install.sh URL> | sudo bash`. Piped in like that, the
+# script has none of the repository's files around it, so download the repository and run
+# the real installer from there. Options are passed on (`| sudo bash -s -- --password x`).
+GITHUB_REPO="${BOBCAT_GW_REPO:-OWNER/bobcat-gw}"
+GITHUB_REF="${BOBCAT_GW_REF:-main}"
+if [ ! -f "$SRC_DIR/web/bobcat_gw.py" ]; then
+    [ "$(id -u)" -eq 0 ] || die "run as root: curl -fsSL <install.sh URL> | sudo bash"
+    TARBALL="${BOBCAT_GW_TARBALL:-https://github.com/$GITHUB_REPO/archive/$GITHUB_REF.tar.gz}"
+    DL=$(mktemp -d /tmp/bobcat-gw.XXXXXX)
+    echo "Downloading bobcat-gw from $TARBALL"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$TARBALL" | tar -xz -C "$DL" --strip-components=1
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "$TARBALL" | tar -xz -C "$DL" --strip-components=1
+    else
+        die "neither curl nor wget is installed"
+    fi
+    [ -f "$DL/install.sh" ] && [ -f "$DL/web/bobcat_gw.py" ] || die "the download does not look like bobcat-gw"
+    # stdin is the pipe the script came from; give the real installer the terminal, if
+    # there is one, so it can ask for the web UI password.
+    if (: </dev/tty) 2>/dev/null; then
+        exec bash "$DL/install.sh" "${ARGS[@]}" </dev/tty
+    fi
+    exec bash "$DL/install.sh" "${ARGS[@]}" </dev/null
+fi
 
 echo "=========================================="
 echo " bobcat-gw ${VERSION} - Bobcat 300 LoRaWAN gateway"
@@ -58,7 +89,7 @@ done
 # Run detached, so a dropped SSH session cannot interrupt the install (the board is slow
 # to respond while it builds). The password is asked for first, as that needs a terminal.
 if [ -z "${BGW_DETACHED:-}" ]; then
-    if [ -z "$WEB_PASSWORD" ] && [ -t 0 ] && ! grep -q '"password_hash": "pbkdf2' "$CONF/config.json" 2>/dev/null; then
+    if [ "$DEFAULT_PW" -eq 0 ] && [ -z "$WEB_PASSWORD" ] && [ -t 0 ] && ! grep -q '"password_hash": "pbkdf2' "$CONF/config.json" 2>/dev/null; then
         while :; do
             read -r -s -p "Choose a web UI password (8+ characters): " WEB_PASSWORD; echo
             [ "${#WEB_PASSWORD}" -ge 8 ] && break
@@ -66,7 +97,7 @@ if [ -z "${BGW_DETACHED:-}" ]; then
         done
     fi
     LOGFILE=/var/log/bobcat-gw-install.log
-    BGW_DETACHED=1 BGW_PW="$WEB_PASSWORD" setsid nohup "$0" "$@" </dev/null >"$LOGFILE" 2>&1 &
+    BGW_DETACHED=1 BGW_PW="$WEB_PASSWORD" setsid nohup "$0" "${ARGS[@]}" </dev/null >"$LOGFILE" 2>&1 &
     CHILD=$!
     echo "Installing in the background; it is safe if this connection drops."
     echo "Log file: $LOGFILE   (re-attach with: tail -f $LOGFILE)"
@@ -118,7 +149,7 @@ fi
 
 # ------------------------------------------------------------------
 step "Stopping software that uses the concentrator"
-systemctl stop bobcat-gw-pktfwd bobcat-gw-station bobcat-gw-mqtt 2>/dev/null || true
+systemctl stop bobcat-gw-station bobcat-gw-pktfwd bobcat-gw-mqtt 2>/dev/null || true
 if command -v docker >/dev/null 2>&1; then
     # Bobcat300-TTN / Helium packet forwarder containers would fight over the SPI bus.
     for c in $(docker ps -a --format '{{.Names}} {{.Image}}' 2>/dev/null \
@@ -146,7 +177,7 @@ memcap() {
 APT_OPTS=(-o DPkg::Lock::Timeout=900 -y -q
           -o Acquire::IndexTargets::deb::Contents-deb::DefaultEnabled=false
           -o Acquire::PDiffs=false)
-NEED=(curl ca-certificates python3 network-manager coreutils)
+NEED=(curl ca-certificates python3 network-manager coreutils chrony)
 [ "$BUILD_ON_DEVICE" -eq 1 ] && NEED+=(build-essential git)
 MISSING=()
 for p in "${NEED[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || MISSING+=("$p"); done
@@ -254,7 +285,7 @@ install -m 644 "$SRC_DIR/web/static/index.html" "$APP/web/static/index.html"
 for u in "$SRC_DIR"/files/systemd/*.service; do
     install -m 644 "$u" /etc/systemd/system/
 done
-mkdir -p "$STATE/pktfwd" "$STATE/station" "$STATE/mqtt"
+mkdir -p "$STATE/station" "$STATE/pktfwd" "$STATE/mqtt"
 ln -sf "$APP/bin/reset_lgw.sh" "$STATE/pktfwd/reset_lgw.sh"
 systemctl daemon-reload
 
@@ -282,6 +313,63 @@ fi
 for c in bobcat-wifi bobcat-hotspot; do nmcli connection delete "$c" >/dev/null 2>&1 || true; done
 rm -f /etc/NetworkManager/dnsmasq-shared.d/bobcat-gw.conf /etc/bobcat-gw/wifi-ca.pem \
       /usr/lib/systemd/system-shutdown/bobcat-gw-cold-reboot
+
+# ------------------------------------------------------------------
+step "Reducing SD card writes"
+# Logging was the gateway's biggest SD card writer (about 2 GB a day of small writes,
+# mostly the systemd journal). Keep the journal in RAM, and let Armbian's ramlog hold
+# /var/log in RAM and copy it to the card only now and then. Logs don't survive a reboot.
+rm -f /etc/systemd/journald.conf.d/bobcat-gw-debug.conf   # left over from debugging
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/bobcat-gw.conf <<'EOF'
+# bobcat-gw: keep the journal in RAM to spare the SD card. Logs don't survive a reboot.
+[Journal]
+Storage=volatile
+RuntimeMaxUse=30M
+EOF
+systemctl restart systemd-journald
+rm -rf /var/log/journal
+if [ -f /etc/default/armbian-ramlog ]; then
+    sed -i 's/^ENABLED=.*/ENABLED=true/' /etc/default/armbian-ramlog
+    systemctl enable armbian-ramlog >/dev/null 2>&1 || true
+    # ramlog copies /var/log into a small RAM disk at boot: drop old rotated logs first
+    find /var/log -type f \( -name '*.gz' -o -name '*.[0-9]' \) -delete
+    echo "Logs are kept in RAM from the next boot (armbian-ramlog)."
+fi
+
+# ------------------------------------------------------------------
+step "Setting up time sync (chrony)"
+# The board has no battery-backed clock: after a power cut it starts in 2017. Sync fast
+# and keep tracking closely: LoRa packet timestamps and TLS to the network server depend
+# on it. chrony replaces systemd-timesyncd (the package conflicts with it).
+cat > /etc/chrony/sources.d/bobcat-gw.sources <<'EOF'
+# bobcat-gw: quick first sync (iburst), then back off from 64 s to about hourly (2^12 s).
+server time.cloudflare.com iburst minpoll 6 maxpoll 12
+server time.google.com iburst minpoll 6 maxpoll 12
+EOF
+cat > /etc/chrony/conf.d/bobcat-gw.conf <<'EOF'
+# bobcat-gw: step the clock whenever it is more than 100 ms off, not only at start-up.
+makestep 0.1 -1
+EOF
+# Make sure chrony reads the two files above (Debian's chrony.conf does, older ones may not).
+grep -q '^sourcedir /etc/chrony/sources.d' /etc/chrony/chrony.conf || echo 'sourcedir /etc/chrony/sources.d' >> /etc/chrony/chrony.conf
+grep -q '^confdir /etc/chrony/conf.d' /etc/chrony/chrony.conf || echo 'confdir /etc/chrony/conf.d' >> /etc/chrony/chrony.conf
+# Use only the servers above: comment out the distribution's pool and its makestep.
+sed -i -e 's/^\(pool .*\)/# bobcat-gw: \1/' -e 's/^\(makestep .*\)/# bobcat-gw: \1/' /etc/chrony/chrony.conf
+systemctl enable chrony >/dev/null 2>&1 || true
+systemctl restart chrony
+sleep 5
+chronyc -n sources 2>/dev/null | tail -n +3 || true
+
+# ------------------------------------------------------------------
+step "Enabling <hostname>.local (avahi mDNS)"
+# Optional: lets you open http://<hostname>.local/ without looking up the IP address.
+# Needs the internet to install; the gateway works without it.
+if ! dpkg -s avahi-daemon >/dev/null 2>&1; then
+    { memcap apt-get "${APT_OPTS[@]}" update &&
+      memcap nice -n 10 apt-get "${APT_OPTS[@]}" install --no-install-recommends avahi-daemon; }         || echo "WARNING: avahi could not be installed (no internet?). Use the IP address instead."
+fi
+systemctl enable --now avahi-daemon >/dev/null 2>&1 || true
 
 # ------------------------------------------------------------------
 step "Identifying the gateway"
@@ -327,7 +415,7 @@ EOF
 
 # ------------------------------------------------------------------
 step "Configuring"
-if [ -z "$WEB_PASSWORD" ] && ! grep -q '"password_hash": "pbkdf2' "$CONF/config.json" 2>/dev/null; then
+if [ "$DEFAULT_PW" -eq 0 ] && [ -z "$WEB_PASSWORD" ] && ! grep -q '"password_hash": "pbkdf2' "$CONF/config.json" 2>/dev/null; then
     if [ -t 0 ]; then
         while :; do
             read -r -s -p "Choose a web UI password (8+ characters): " WEB_PASSWORD; echo
@@ -339,7 +427,10 @@ if [ -z "$WEB_PASSWORD" ] && ! grep -q '"password_hash": "pbkdf2' "$CONF/config.
         GENERATED_PW=1
     fi
 fi
-RESULT=$(BOBCAT_GW_PASSWORD="$WEB_PASSWORD" python3 "$APP/web/bobcat_gw.py" --init | tail -1)
+# The web UI password is root's password too (bobcat_gw.py --init sets both).
+SET_DEFAULT=""
+[ "$DEFAULT_PW" -eq 1 ] && [ -z "$WEB_PASSWORD" ] && ! grep -q '"password_hash": "pbkdf2' "$CONF/config.json" 2>/dev/null && SET_DEFAULT=1
+RESULT=$(BOBCAT_GW_PASSWORD="$WEB_PASSWORD" BOBCAT_GW_DEFAULT_PASSWORD="$SET_DEFAULT" python3 "$APP/web/bobcat_gw.py" --init | tail -1)
 systemctl enable bobcat-gw-web.service >/dev/null 2>&1
 systemctl restart bobcat-gw-web.service
 
@@ -352,7 +443,10 @@ echo " bobcat-gw installed"
 echo "=========================================="
 echo
 echo "Web UI       : $(for ip in $IPS; do printf 'http://%s/  ' "$ip"; done)"
+systemctl is-active --quiet avahi-daemon 2>/dev/null && echo "               http://$(hostname).local/"
 [ "${GENERATED_PW:-0}" = 1 ] && echo "Web password : $WEB_PASSWORD   (generated - change it in System)"
+[ -n "$SET_DEFAULT" ] && echo "Password     : bobcat (default, for the web UI and root). The web UI asks you to change it on first login."
+[ -n "$WEB_PASSWORD" ] && [ "${GENERATED_PW:-0}" != 1 ] && echo "Password     : as given; root's password is now the same as the web UI password"
 echo "Gateway EUI  : $(get gateway_eui)"
 echo "Backend      : $(get backend)   region $(get region)"
 echo
