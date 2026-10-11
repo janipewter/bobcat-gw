@@ -1,0 +1,14 @@
+[Unit]
+Description=bobcat-gw first-boot setup (ready-made image)
+After=armbian-firstrun.service armbian-resize-filesystem.service network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/bobcat-gw/firstboot.done
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/bobcat-gw-src/image/firstboot.sh
+TimeoutStartSec=infinity
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
