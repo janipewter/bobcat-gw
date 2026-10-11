@@ -30,7 +30,7 @@ import time
 import urllib.parse
 import urllib.request
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 APP_DIR = os.environ.get("BOBCAT_GW_APP", "/opt/bobcat-gw")
 CONF_DIR = os.environ.get("BOBCAT_GW_CONF", "/etc/bobcat-gw")
@@ -1322,6 +1322,45 @@ SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp(256|384|521)|
 AUTH_KEYS = "/root/.ssh/authorized_keys"
 
 
+HOSTNAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def set_hostname(name):
+    """Rename the gateway: hostname, /etc/hosts (so sudo and friends can resolve it) and the
+    avahi .local name."""
+    name = str(name).strip().lower()
+    if not HOSTNAME_RE.match(name):
+        raise ValueError("Use letters, digits and hyphens (not at the start or end), up to 63 characters.")
+    rc, out = run(["hostnamectl", "set-hostname", name])
+    if rc != 0:
+        raise RuntimeError(out.strip() or "hostnamectl set-hostname failed")
+    try:
+        with open("/etc/hosts") as f:
+            lines = f.read().splitlines()
+        old = next((l.split()[1] for l in lines if l.split()[:1] == ["127.0.1.1"] and len(l.split()) > 1), None)
+        out_lines, seen = [], False
+        for l in lines:
+            f = l.split()
+            if f[:1] == ["127.0.1.1"]:
+                if seen:
+                    continue
+                l, seen = f"127.0.1.1   {name}", True
+            elif old and f[:1] == ["::1"] and old in f[1:]:
+                l = "::1         " + " ".join(name if x == old else x for x in f[1:])
+            out_lines.append(l)
+        if not seen:
+            out_lines.insert(1, f"127.0.1.1   {name}")
+        with open("/etc/hosts.tmp", "w") as f:
+            f.write("\n".join(out_lines) + "\n")
+        os.replace("/etc/hosts.tmp", "/etc/hosts")
+    except OSError:
+        pass
+    if run(["systemctl", "is-active", "--quiet", "avahi-daemon"], timeout=10)[0] == 0:
+        run(["systemctl", "restart", "avahi-daemon"], timeout=30)
+    os.sync()
+    return name
+
+
 def ssh_status():
     rc, active = run(["systemctl", "is-active", "ssh"], timeout=10)
     rc, enabled = run(["systemctl", "is-enabled", "ssh"], timeout=10)
@@ -1932,6 +1971,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except (ValueError, RuntimeError) as e:
                 return self.send_json({"error": str(e)}, 400)
             return self.send_json({"ok": True, **ssh_status()})
+        if a == "set_hostname":
+            try:
+                name = set_hostname(body.get("hostname", ""))
+            except (ValueError, RuntimeError) as e:
+                return self.send_json({"error": str(e)}, 400)
+            return self.send_json({"ok": True, "hostname": name})
         if a == "ssh_disable":
             run(["systemctl", "disable", "--now", "ssh"], timeout=60)
             return self.send_json({"ok": True, **ssh_status()})

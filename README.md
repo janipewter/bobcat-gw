@@ -35,7 +35,8 @@
   - uplink and downlink counts since boot and in total
   - a 24-hour packets-per-hour chart
   - recent packets with full ISO timestamps, RSSI and SNR
-  - service logs, system health, and the gateway's time zone
+  - service logs, system health, time sync status, and the gateway's time zone
+- **Password-protected**: one password for the web UI and root, and SSH stays off until you turn it on.
 - **Remote access** through Tailscale, set up from the web UI.
 - **Updates from GitHub**: the web UI tells you when a new release is out, and installs it with one click when you choose (or `bobcat-gw-update` over SSH), keeping your settings.
 - **Boot protection**: the kernel, device tree and U-Boot packages are held, so `apt upgrade` can't replace them with versions that don't boot on the Bobcat.
@@ -43,18 +44,19 @@
 
 ## Requirements
 
-- A **Bobcat 300 G285** running Armbian from microSD. Flash the G285 image from [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) and follow its "G285 – SD Card Boot" and "First Boot" steps.
-- **Ethernet.** bobcat-gw is Ethernet-only; the installer switches the built-in WiFi off. See [Why Ethernet only?](#why-ethernet-only)
+- A **Bobcat 300 G285** and a **microSD card** of 8 GB or more.
+- **Ethernet.** bobcat-gw is Ethernet-only and switches the built-in WiFi off. See [Why Ethernet only?](#why-ethernet-only)
+- Only if you use the installer instead of the ready-made image: Armbian on the microSD card. Flash the G285 image from [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) and follow its "G285 – SD Card Boot" and "First Boot" steps.
 
 ## Ready-made image
 
 The quickest way: flash a ready-made SD card image and boot straight into the gateway.
 
-1. Download `bobcat-gw-<version>-g285.img.xz` from the releases page and flash it to a microSD card (8 GB or more) with [Balena Etcher](https://etcher.balena.io/) or `dd`.
+1. Download `bobcat-gw-<version>-g285.img.xz` from the [releases page](https://github.com/janipewter/bobcat-gw/releases) and flash it to a microSD card (8 GB or more) with [Balena Etcher](https://etcher.balena.io/) or `dd`. The `.sha256` file next to it lets you check the download.
 2. Put the card in the Bobcat, connect Ethernet, and power it on.
 3. Wait a few minutes while it sets itself up on first boot, then open **http://bobcat-285.local/** (or the IP address your router gave it) and sign in with the default password **bobcat**. You'll be asked to choose a new one straight away.
 
-The image is the [Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) G285 image with bobcat-gw added. The web UI password is also root's password: changing one changes both. SSH is off until you turn it on with **Enable SSH** on the System tab (after the default password has been changed). To have SSH from the first boot, put your public key in `bobcat-gw/authorized_keys` on the card's boot partition before the first boot. The first boot works without internet; only the `.local` name and Tailscale need it.
+The image is the [Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) G285 image with bobcat-gw added. On first boot it grows to fill the card and runs the installer below, unattended (log: `/var/log/bobcat-gw-install.log`). The web UI password is also root's password: changing one changes both. SSH is off until you turn it on with **Enable SSH** on the System tab (after the default password has been changed). To have SSH from the first boot, put your public key in `bobcat-gw/authorized_keys` on the card's boot partition before the first boot. The first boot works without internet; only the `.local` name and Tailscale need it.
 
 To build the image yourself (Linux or WSL2, as root):
 
@@ -88,16 +90,18 @@ sudo ./install.sh
 
 The installer:
 
-1. checks that the board is a G285 and that the SX1302 concentrator answers on `/dev/spidev1.0`;
+1. checks that the board is a G285 and has the concentrator's SPI device, `/dev/spidev1.0`;
 2. holds and pins the `linux-image-*`, `linux-dtb-*`, `linux-u-boot-*` and `armbian-bsp-cli-*` packages (see [Boot protection](#boot-protection));
 3. stops any old packet forwarder or Helium Docker containers that would compete for the concentrator;
 4. installs the prebuilt Basics Station and packet forwarder from `prebuilt/aarch64/`, downloads the ChirpStack MQTT Forwarder, and installs Tailscale from its official repository;
-5. switches the built-in WiFi off;
-6. keeps logs in RAM to spare the SD card (see [SD card wear](#sd-card-wear));
-7. sets up chrony to keep the clock tightly synced (see [Time sync](#time-sync));
-8. installs the web UI, asks for a web UI password, and prints the gateway EUI.
+5. installs the web UI, its services, and the `bobcat-gw-update` command;
+6. switches the built-in WiFi off;
+7. keeps logs in RAM to spare the SD card (see [SD card wear](#sd-card-wear));
+8. sets up chrony to keep the clock tightly synced (see [Time sync](#time-sync));
+9. makes the gateway reachable as `http://<hostname>.local/` (avahi), if the package can be installed;
+10. reads the gateway EUI from the concentrator, sets the password for the web UI and root, and prints the web UI address.
 
-It takes a few minutes. The installer re-runs itself in the background, so a dropped SSH session can't interrupt it; the log is in `/var/log/bobcat-gw-install.log`. It is safe to run again.
+It takes a few minutes. On a first install without `--password` or `--default-password`, it asks for a password (8 characters or more) first. It then re-runs itself in the background, so a dropped SSH session can't interrupt it; the log is in `/var/log/bobcat-gw-install.log`. It is safe to run again: settings and the password are kept.
 
 Options:
 
@@ -115,14 +119,14 @@ The one-line install downloads `janipewter/bobcat-gw` at `main`; set `BOBCAT_GW_
 
 ## Using the web UI
 
-Open `http://<gateway-ip>/` and sign in.
+Open `http://<gateway-ip>/` (or `http://<hostname>.local/`) and sign in.
 
 | Tab | What it's for |
 |---|---|
 | **Dashboard** | Connection state, packet counters, the 24-hour chart, and recent packets |
-| **LNS** | Connection method (or monitor only), preset, region, and for US915/AU915 the sub-band. Saving restarts the backend with the new settings. |
+| **LNS** | Connection method (or monitor only), preset, region, and for US915/AU915 the sub-band. Keys and certificates can be pasted or loaded from a file. Saving restarts the backend with the new settings. |
 | **Network** | The Ethernet interface, and Tailscale |
-| **System** | Health, updates, boot protection status, time sync and time zone, service logs, restarting the services, rebooting, SSH on/off, and the password (for the web UI and root) |
+| **System** | Health, the hostname, updates, boot protection status, time sync and time zone, service logs, restarting the services, rebooting, SSH on/off, and the password (for the web UI and root) |
 
 ### The Things Network
 
@@ -188,7 +192,7 @@ The Bobcat 300 isn't supported by mainline Armbian, and an upgraded kernel, devi
 | MQTT | `lora_pkt_fwd` → 127.0.0.1:1700 → `chirpstack-mqtt-forwarder` → MQTT broker |
 
 - Everything runs natively under systemd as `bobcat-gw-station`, `bobcat-gw-pktfwd`, `bobcat-gw-mqtt` and `bobcat-gw-web`. There is no Docker.
-- The SX1302 is powered and reset by `/opt/bobcat-gw/bin/reset_lgw.sh` (GPIOs 125 and 122 for power, 149 for reset), the same sequence as Bobcat300-TTN.
+- The SX1302 is powered and reset by `/opt/bobcat-gw/bin/reset_lgw.sh` (GPIOs 125 and 122 for power, 149 for reset; the pins and timing were worked out by Bobcat300-TTN). The pin numbers can be overridden in `/etc/bobcat-gw/hw.env`.
 - The Bobcat has no STTS751 temperature sensor, which makes the stock Semtech HAL refuse to start. `files/patch_hal_tempsensor.py` patches the HAL to use a fixed 25 °C instead.
 - The web UI, `/opt/bobcat-gw/web/bobcat_gw.py`, is a single Python program using only the standard library. It writes the backend configuration, starts and stops the services, and reads statistics from their journal.
 
@@ -198,6 +202,8 @@ The Bobcat 300 isn't supported by mainline Armbian, and an upgraded kernel, devi
 | `/etc/bobcat-gw/hw.json` | Hardware details found by the installer |
 | `/var/lib/bobcat-gw/` | Generated backend configs, and the packet totals |
 | `/opt/bobcat-gw/` | Binaries and the web UI |
+| `/opt/bobcat-gw-src/` | Source of the installed version (on the ready-made image, and after an update) |
+| `/var/log/bobcat-gw-install.log`, `/var/log/bobcat-gw-update.log` | Installer and updater logs |
 
 Logs: `journalctl -u bobcat-gw-station -f` (or `-pktfwd`, `-mqtt`, `-web`).
 
@@ -216,9 +222,10 @@ The script links against Debian 12's libc, so the binaries run on the gateway ev
 The updater offers the highest `vX.Y.Z` tag, so a release is:
 
 1. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), and commit.
-2. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
+2. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin main vX.Y.Z`. Gateways see it within 12 hours, or straight away with **Check now**.
+3. Optionally, build the image from the tag (`tools/build-image.sh`) and attach it with its `.sha256` to a GitHub release, marked as a pre-release while the project is an alpha.
 
-A GitHub release with notes is optional; the **What's new** link on the System tab opens the tag's page either way.
+The **What's new** link on the System tab opens the tag's page, with or without a GitHub release.
 
 ## Limitations
 
@@ -227,7 +234,6 @@ A GitHub release with notes is optional; the **What's new** link on the System t
 - Ethernet only (see [Why Ethernet only?](#why-ethernet-only)).
 - No GPS, so no Class B beacons and no fine timestamps.
 - The web UI is plain HTTP for the local network. Don't expose port 80 to the internet; use Tailscale for remote access.
-- If the gateway ever stops responding, unplug the power for at least 60 seconds before plugging it back in.
 
 ## Credits
 

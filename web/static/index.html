@@ -63,6 +63,8 @@ main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 .s-good .dot { background: var(--good); } .s-warning .dot { background: var(--warning); }
 .s-serious .dot { background: var(--serious); } .s-critical .dot { background: var(--critical); }
 .s-off .dot { background: var(--muted); }
+.link-btn { background: none; border: 0; padding: 0; margin-left: 8px; font: inherit; font-size: 13px; color: var(--accent); cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
 .upd-pill { cursor: pointer; font: inherit; font-size: 12px; color: var(--accent); border-color: var(--accent); }
 .upd-pill:hover { background: var(--accent); color: var(--accent-ink); }
 .pill { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--border); }
@@ -1093,7 +1095,7 @@ async function loadSystem() {
     $("s-info").innerHTML = [["Hostname", s.hostname], ["Uptime", uptime], ["Load", (s.load || []).join(" ")],
       ["CPU temperature", s.cpu_temp != null ? s.cpu_temp + " °C" : ""], ["Memory", s.mem ? `${s.mem.used_mb} / ${s.mem.total_mb} MB` : ""],
       ["SD card", s.disk ? `${s.disk.used_gb} / ${s.disk.total_gb} GB` : ""],
-      ["bobcat-gw", s.version], ...Object.entries(v)].map(([k, val]) => `<dt>${esc(k)}</dt><dd>${k === "Uptime" ? val : esc(val)}</dd>`).join("");
+      ["bobcat-gw", s.version], ...Object.entries(v)].map(([k, val]) => `<dt>${esc(k)}</dt><dd>${k === "Uptime" ? val : esc(val)}${k === "Hostname" ? `<button type="button" class="link-btn" id="host-edit">Change</button>` : ""}</dd>`).join("");
     const h = s.holds;
     $("s-holds").innerHTML = (h.missing.length
       ? `<p>${statusBadge("critical", "Not protected")}</p><p class="sub">These packages are not held, so an upgrade could replace the Bobcat kernel, device tree or bootloader and stop the gateway from booting: <b>${esc(h.missing.join(", "))}</b>.</p><p class="sub">Fix: <code>sudo apt-mark hold ${esc(h.missing.join(" "))}</code></p>`
@@ -1184,10 +1186,35 @@ document.addEventListener("submit", async (e) => {
   } catch (err) { $("ssh-msg").className = "msg err"; $("ssh-msg").textContent = err.message; }
   $("ssh-ok").disabled = false;
 });
+// Hostname (delegated: the button is re-rendered with the System card, the dialog comes after this script)
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#host-edit")) return;
+  $("host-name").value = $("hostname").textContent.trim();
+  $("host-msg").textContent = ""; $("host-msg").className = "sub";
+  $("host-dlg").showModal(); $("host-name").select();
+});
+document.addEventListener("submit", async (e) => {
+  if (e.target.id !== "host-form") return;
+  if (e.submitter && e.submitter.value === "cancel") return;
+  e.preventDefault();
+  const old = $("hostname").textContent.trim();
+  $("host-ok").disabled = true;
+  try {
+    const r = await api("/api/action", {action: "set_hostname", hostname: $("host-name").value});
+    $("host-dlg").close();
+    $("hostname").textContent = r.hostname; $("login-host").textContent = r.hostname;
+    document.title = `${r.hostname} · Bobcat Gateway`;
+    if (r.hostname !== old && location.hostname.toLowerCase() === `${old}.local`) {
+      toast(`Renamed to ${r.hostname}. Moving to ${r.hostname}.local…`);
+      setTimeout(() => { location.href = `http://${r.hostname}.local/`; }, 3000);
+    } else toast(`Renamed to ${r.hostname}.`);
+    loadSystem();
+  } catch (err) { $("host-msg").className = "msg err"; $("host-msg").textContent = err.message; }
+  $("host-ok").disabled = false;
+});
 $("s-reboot").addEventListener("click", async () => {
   if (!(await confirmDialog({title: "Reboot the gateway?", ok: "Reboot", danger: true,
-    text: ["The gateway restarts and is usually back in about a minute. LoRa traffic stops until then.",
-           "If it does not come back within a few minutes, unplug the power for at least 60 seconds."]}))) return;
+    text: "The gateway restarts and is usually back in about a minute. LoRa traffic stops until then."}))) return;
   try { await api("/api/action", {action: "reboot"}); } catch (err) { setMsg($("s-msg"), err.message, "err"); return; }
   clearInterval(timer);
   const d = $("reboot-dlg"), st = $("reboot-status"), t0 = Date.now();
@@ -1306,6 +1333,23 @@ start();
     <div class="modal-actions">
       <button class="btn" value="cancel" formnovalidate>Cancel</button>
       <button class="btn primary" id="ssh-ok">Enable SSH</button>
+    </div>
+  </form>
+</dialog>
+<dialog class="modal" id="host-dlg">
+  <form method="dialog" id="host-form">
+    <div class="modal-body">
+      <h2>Change hostname</h2>
+      <p>The gateway's name on your network: it answers to <code>&lt;name&gt;.local</code>, and it's shown in this page's title. If you opened this page by its <code>.local</code> name, you'll need to sign in again at the new one.</p>
+      <label for="host-name" style="margin-top:0">Hostname</label>
+      <input type="text" id="host-name" spellcheck="false" autocomplete="off" autocapitalize="none" maxlength="63" required
+             pattern="[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?" title="Letters, digits and hyphens (not at the start or end)">
+      <div class="hint">Letters, digits and hyphens, up to 63 characters.</div>
+      <div id="host-msg" class="sub"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn primary" id="host-ok">Save</button>
     </div>
   </form>
 </dialog>
