@@ -328,6 +328,12 @@ body.login-mode { background:
       <label for="eui">Gateway EUI</label>
       <input type="text" id="eui" class="w-s" readonly tabindex="-1" spellcheck="false" style="font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--surface-2);cursor:default">
       <div class="hint" id="eui-hint"></div>
+      <div class="row">
+        <div class="w-s"><label for="loc-lat">Latitude</label><input type="text" id="loc-lat" class="w-s" inputmode="decimal" placeholder="e.g. 51.5072" autocomplete="off"></div>
+        <div class="w-s"><label for="loc-lon">Longitude</label><input type="text" id="loc-lon" class="w-s" inputmode="decimal" placeholder="e.g. -0.1276" autocomplete="off"></div>
+        <div class="w-xs"><label for="loc-alt">Altitude (m)</label><input type="text" id="loc-alt" class="w-xs" inputmode="numeric" placeholder="optional" autocomplete="off"></div>
+      </div>
+      <div class="hint" style="max-width:42rem">Where the gateway is, in decimal degrees (right-click a spot in Google Maps or OpenStreetMap to copy them). With Semtech UDP and MQTT it is sent to the network server in the gateway's status messages; on TTN, also tick "Update from status messages" on the gateway's Location page. Basics Station can't send a location, so set it in the network server's console too.</div>
 
       <h2 style="margin-top:26px">Network server</h2>
       <label>Connection method</label>
@@ -950,6 +956,8 @@ function populateLns() {
   $("mq-ca").value = m.ca_cert; $("mq-cert").value = m.tls_cert; $("mq-key").value = "";
   $("mq-key").placeholder = m.tls_key ? "Stored. Paste a new key to replace it." : "";
   $("eui").value = c.gateway_eui;
+  const loc = c.location || {};
+  $("loc-lat").value = loc.lat ?? ""; $("loc-lon").value = loc.lon ?? ""; $("loc-alt").value = loc.alt ?? "";
   $("eui-hint").textContent = EUI_SOURCE === "chip"
     ? "The unique ID of this gateway's LoRa concentrator chip. It can't be changed. Register exactly this EUI on your network server."
     : "Derived from the Ethernet MAC address, because the concentrator chip's EUI could not be read during installation. Re-run install.sh to fix this. Register exactly this EUI on your network server.";
@@ -1010,6 +1018,7 @@ $("lns-form").addEventListener("submit", async (e) => {
     mqtt: {server: $("mq-server").value.trim(), topic_prefix: $("mq-prefix").value.trim(), username: $("mq-user").value,
       password: $("mq-pass").value, json: $("mq-json").value === "true", ca_cert: $("mq-ca").value, tls_cert: $("mq-cert").value,
       tls_key: keep($("mq-key").value, CFG.mqtt.tls_key)},
+    location: {lat: $("loc-lat").value.trim(), lon: $("loc-lon").value.trim(), alt: $("loc-alt").value.trim()},
   };
   const oldPlan = CFG.region + (["US915", "AU915"].includes(CFG.region) ? " sub-band " + CFG.subband : "");
   const newPlan = body.region + (["US915", "AU915"].includes(body.region) ? " sub-band " + body.subband : "");

@@ -125,7 +125,7 @@ Open `http://<gateway-ip>/` (or `http://<hostname>.local/`) and sign in.
 | Tab | What it's for |
 |---|---|
 | **Dashboard** | Connection state, packet counters, the 24-hour chart, and recent packets |
-| **LNS** | Connection method (or monitor only), preset, region, and for US915/AU915 the sub-band. Keys and certificates can be pasted or loaded from a file. Saving restarts the backend with the new settings. |
+| **LNS** | Connection method (or monitor only), preset, region, for US915/AU915 the sub-band, and the gateway's location. Keys and certificates can be pasted or loaded from a file. Saving restarts the backend with the new settings. |
 | **Network** | The Ethernet interface, and Tailscale |
 | **System** | Health, the hostname, updates, boot protection status, time sync and time zone, service logs, restarting the services, rebooting, SSH on/off, and the password (for the web UI and root) |
 
@@ -138,6 +138,8 @@ Open `http://<gateway-ip>/` (or `http://<hostname>.local/`) and sign in.
 | Semtech UDP | Register the gateway EUI. | Server `eu1.cloud.thethings.network`, ports 1700 |
 
 Use the gateway EUI shown in the web UI, and the cluster (`eu1`, `nam1`, `au1`) you registered on. TTN doesn't accept gateways over MQTT; use MQTT with ChirpStack.
+
+**Location:** with Semtech UDP (and MQTT), the latitude, longitude and altitude set on the LNS tab go to the network server in the gateway's status messages. On TTN, tick **Update from status messages** on the gateway's Location page to use them. Basics Station has no way to report a location, so set it in the TTN console. With Basics Station, the gateway reports its version to TTN as `bobcat-gw <version>`.
 
 ### ChirpStack over MQTT
 

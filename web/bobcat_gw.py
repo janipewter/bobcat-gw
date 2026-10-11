@@ -81,6 +81,9 @@ DEFAULT_CONFIG = {
         "tls_cert": "",
         "tls_key": "",
     },
+    # Where the gateway is (WGS84 degrees, metres above sea level); None = not set. The packet
+    # forwarder reports it in its status messages (Semtech UDP and MQTT); Basics Station can't.
+    "location": {"lat": None, "lon": None, "alt": None},
     "tailscale": {"hostname": "", "ssh": False},
     # must_change: still on the default password (DEFAULT_PASSWORD); the web UI only lets you
     # change it until then. An empty hash means the default password too.
@@ -295,6 +298,12 @@ def build_global_conf(cfg, hw, server, port_up, port_down):
         "ref_altitude": 0,
         "beacon_period": 0,
     }
+    loc = cfg.get("location") or {}
+    if loc.get("lat") is not None and loc.get("lon") is not None:
+        # No GPS: "fake_gps" makes the forwarder put the reference position in its status
+        # messages. It only affects those; packet timestamps don't change.
+        gw.update(ref_latitude=float(loc["lat"]), ref_longitude=float(loc["lon"]),
+                  ref_altitude=int(loc.get("alt") or 0), fake_gps=True)
     return {"SX130x_conf": sx, "gateway_conf": gw}
 
 
@@ -358,6 +367,9 @@ def render_station(cfg, hw):
     os.makedirs(d, mode=0o700)
     b = cfg["basicstation"]
     write_file(os.path.join(d, "station.conf"), json.dumps(station_conf(cfg, hw), indent=2))
+    # Station reports this file as its "firmware" and "package" version (TTN shows it in the
+    # gateway's status), so the network server can see the gateway runs bobcat-gw.
+    write_file(os.path.join(d, "version.txt"), f"bobcat-gw {VERSION}\n")
     prefix = "cups" if b["mode"] == "cups" else "tc"
     uri = b["uri"].strip()
     write_file(os.path.join(d, prefix + ".uri"), uri + "\n")
@@ -468,6 +480,30 @@ class ConfigStore:
 
 EUI_RE = re.compile(r"^[0-9A-Fa-f]{16}$")
 HOST_RE = re.compile(r"^[A-Za-z0-9.\-:\[\]]+$")
+
+
+def clean_location(loc):
+    """Location from the web UI: numbers or empty fields. Raises ValueError with a message."""
+    if not isinstance(loc, dict):
+        raise ValueError("Location must be latitude, longitude and altitude.")
+    out = {}
+    for k, lo, hi, name in (("lat", -90, 90, "Latitude"), ("lon", -180, 180, "Longitude"), ("alt", -500, 9000, "Altitude")):
+        v = loc.get(k)
+        if v is None or str(v).strip() == "":
+            out[k] = None
+            continue
+        try:
+            v = float(str(v).strip().replace(",", "."))
+        except ValueError:
+            raise ValueError(f"{name} must be a number.")
+        if not lo <= v <= hi or v != v:
+            raise ValueError(f"{name} must be between {lo} and {hi}.")
+        out[k] = round(v) if k == "alt" else round(v, 6)
+    if (out["lat"] is None) != (out["lon"] is None):
+        raise ValueError("Give both latitude and longitude, or neither.")
+    if out["lat"] is None:
+        out["alt"] = None
+    return out
 
 
 def validate(cfg):
@@ -1914,6 +1950,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         new = deep_merge(old, {k: body[k] for k in ("region", "subband", "backend",
                                                      "basicstation", "udp", "mqtt") if k in body})
         self.merge_secrets(new, old)
+        if "location" in body:
+            try:
+                new["location"] = clean_location(body["location"])
+            except ValueError as e:
+                return self.send_json({"error": str(e), "errors": [str(e)]}, 400)
         try:
             new["subband"] = int(new.get("subband", 2))
         except (TypeError, ValueError):
