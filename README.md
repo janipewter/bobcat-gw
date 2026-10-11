@@ -24,6 +24,7 @@
 
 ## Features
 
+- **A full 8-channel LoRaWAN gateway**, not a single-channel one. The Bobcat's SX1302 concentrator listens on 8 LoRa channels at once, each decoding every spreading factor (SF7–SF12) at the same time, plus a 250/500 kHz LoRa channel and an FSK channel. That covers the whole EU868 channel plan; on US915 and AU915 it covers one sub-band (8 of the 64 uplink channels), chosen on the LNS tab.
 - **Three ways to reach your network server**
   - LoRa Basics Station (recommended): LNS or CUPS over TLS, with API key/token or client certificate authentication
   - Semtech UDP packet forwarder: unencrypted and unauthenticated, but supported almost everywhere
