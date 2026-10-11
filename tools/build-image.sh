@@ -101,7 +101,7 @@ EOF
 rm -rf "$R/var/log/journal"
 [ -f "$R/etc/default/armbian-ramlog" ] && sed -i 's/^ENABLED=.*/ENABLED=true/' "$R/etc/default/armbian-ramlog"
 
-step "Logins: web UI first, no default passwords"
+step "Logins: web UI first (default password set on first boot), no wizard"
 rm -f "$R/root/.not_logged_in_yet"   # Armbian's interactive first-login wizard
 rm -f "$R/etc/systemd/system/getty@.service.d/override.conf" \
       "$R/etc/systemd/system/serial-getty@.service.d/override.conf"   # root console autologin
