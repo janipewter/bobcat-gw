@@ -37,7 +37,7 @@
   - recent packets with full ISO timestamps, RSSI and SNR
   - service logs, system health, and the gateway's time zone
 - **Remote access** through Tailscale, set up from the web UI.
-- **Updates from GitHub** with one click on the System tab (or `bobcat-gw-update` over SSH), keeping your settings.
+- **Updates from GitHub**: the web UI tells you when a new release is out, and installs it with one click when you choose (or `bobcat-gw-update` over SSH), keeping your settings.
 - **Boot protection**: the kernel, device tree and U-Boot packages are held, so `apt upgrade` can't replace them with versions that don't boot on the Bobcat.
 - **Nothing on the eMMC is touched.** Everything runs from the microSD card; remove the card and the Bobcat boots its original Helium firmware.
 
@@ -140,7 +140,7 @@ Point the forwarder at your ChirpStack MQTT broker and set the topic prefix to t
 
 ## Updating
 
-The System tab checks GitHub for a newer release (the highest `vX.Y.Z` tag of this repository). If there is one, **Update to vX.Y.Z** downloads it and runs its installer in the background, with the progress shown in a window. Settings, the password, the packet counters and the gateway EUI are kept. LoRa traffic stops for a minute or so while the services restart, and the page reloads when the update is done. There's no need to reflash the SD card.
+The gateway checks GitHub for a newer release (the highest `vX.Y.Z` tag of this repository) a couple of minutes after it starts and then twice a day. When there is one, the web UI's header shows **Update available**; nothing is installed until you choose to. On the System tab, **Update to vX.Y.Z** downloads it and runs its installer in the background, with the progress shown in a window. Settings, the password, the packet counters and the gateway EUI are kept. LoRa traffic stops for a minute or so while the services restart, and the page reloads when the update is done. There's no need to reflash the SD card.
 
 Over SSH, the same thing:
 
