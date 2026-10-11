@@ -52,6 +52,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 #dash > .stack > .grid:first-child .sub, #dash > .stack > .grid:first-child .hint { line-height: 1.5; }
 #dash > .stack > .grid:first-child .hint { margin-top: 2px; }
 .sub { color: var(--text-2); font-size: 13px; }
+[hidden] { display: none !important; }   /* the hidden attribute beats .btn's display */
 .trunc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
 .muted { color: var(--muted); }
