@@ -6,7 +6,7 @@
 # Inspired by https://github.com/AdvdLaar/Bobcat300-TTN
 #
 # Usage: sudo ./install.sh [--password <password> | --default-password] [--rebuild] [--build-on-device] [--force] [--no-tailscale]
-#    or: curl -fsSL https://raw.githubusercontent.com/OWNER/bobcat-gw/main/install.sh | sudo bash -s -- [options]
+#    or: curl -fsSL https://raw.githubusercontent.com/janipewter/bobcat-gw/main/install.sh | sudo bash -s -- [options]
 set -euo pipefail
 
 VERSION="0.1.0"
@@ -52,7 +52,7 @@ die()  { echo "ERROR: $*" >&2; exit 1; }
 # One-line install: `curl -fsSL <raw install.sh URL> | sudo bash`. Piped in like that, the
 # script has none of the repository's files around it, so download the repository and run
 # the real installer from there. Options are passed on (`| sudo bash -s -- --password x`).
-GITHUB_REPO="${BOBCAT_GW_REPO:-OWNER/bobcat-gw}"
+GITHUB_REPO="${BOBCAT_GW_REPO:-janipewter/bobcat-gw}"
 GITHUB_REF="${BOBCAT_GW_REF:-main}"
 if [ ! -f "$SRC_DIR/web/bobcat_gw.py" ]; then
     [ "$(id -u)" -eq 0 ] || die "run as root: curl -fsSL <install.sh URL> | sudo bash"
@@ -200,7 +200,7 @@ if [ "$BUILD_ON_DEVICE" -eq 0 ]; then
     step "Installing the prebuilt packet forwarder and Basics Station"
     PREBUILT="$SRC_DIR/prebuilt/aarch64"
     for b in lora_pkt_fwd chip_id station; do
-        [ -x "$PREBUILT/$b" ] || die "missing prebuilt/aarch64/$b. Build the binaries on a PC with tools/build-binaries.sh (compiling on the gateway is slow and can overload it; --build-on-device forces that)."
+        [ -f "$PREBUILT/$b" ] || die "missing prebuilt/aarch64/$b. Build the binaries on a PC with tools/build-binaries.sh (compiling on the gateway is slow and can overload it; --build-on-device forces that)."
         install -m 755 "$PREBUILT/$b" "$APP/bin/$b"
         if MISSING_LIBS=$(ldd "$APP/bin/$b" 2>&1 | grep -E "not found|version"); then
             die "$b cannot run on this system: $MISSING_LIBS"
@@ -282,6 +282,13 @@ fi
 step "Installing the web UI and services"
 install -m 755 "$SRC_DIR/web/bobcat_gw.py" "$APP/web/bobcat_gw.py"
 install -m 644 "$SRC_DIR/web/static/index.html" "$APP/web/static/index.html"
+cat > /usr/local/sbin/bobcat-gw-update <<'EOF'
+#!/bin/sh
+# Update bobcat-gw to the newest release on GitHub (as the web UI's System tab does).
+#   bobcat-gw-update [--check]
+exec /usr/bin/python3 /opt/bobcat-gw/web/bobcat_gw.py --update-cli "$@"
+EOF
+chmod 755 /usr/local/sbin/bobcat-gw-update
 for u in "$SRC_DIR"/files/systemd/*.service; do
     install -m 644 "$u" /etc/systemd/system/
 done

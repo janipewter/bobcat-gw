@@ -133,6 +133,8 @@ dialog.modal[open] { animation: modal-in .16s ease-out; }
 .linkbtn.file-load { display: block; margin-top: 4px; font-size: 12.5px; }
 .btn.danger-fill { background: var(--critical); border-color: var(--critical); color: #fff; }
 .hidden { display: none !important; }
+#upd-dlg { width: min(640px, calc(100vw - 32px)); }
+#upd-log { max-height: 280px; margin-top: 4px; }
 pre.log { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 11.5px;
   max-height: 460px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0; }
 .chart { position: relative; }
@@ -439,7 +441,10 @@ body.login-mode { background:
   <section id="sys">
     <div class="stack">
       <div class="grid">
-        <div class="card"><h3>System</h3><dl class="kv" id="s-info"></dl></div>
+        <div class="card"><h3>System</h3><dl class="kv" id="s-info"></dl>
+          <div class="sub" id="upd-status" style="margin-top:12px"></div>
+          <div class="actions"><button class="btn" id="upd-check">Check for updates</button><button class="btn primary" id="upd-go" hidden>Update…</button></div>
+        </div>
         <div class="card"><h3>Boot safety (package holds)</h3><div id="s-holds"></div></div>
         <form class="card" id="tz-form">
           <h3>Time</h3>
@@ -637,7 +642,7 @@ function go(t) {
   document.querySelectorAll("main > section").forEach((s) => s.classList.toggle("active", s.id === t));
   if (t === "lns" || t === "net") loadConfig();
   if (t === "net") { loadNetwork(); loadTailscale(); } else clearTimeout(tsTimer);
-  if (t === "sys") { loadSystem(); loadLog(); loadTimezones(); loadTime(); loadSsh(); }
+  if (t === "sys") { loadSystem(); loadLog(); loadTimezones(); loadTime(); loadSsh(); loadUpdate(false); }
 }
 
 // ---- login
@@ -1196,6 +1201,69 @@ $("s-reboot").addEventListener("click", async () => {
   };
   setTimeout(poll, 3000);
 });
+// Updates: the newest vX.Y.Z tag on GitHub, installed by its own installer in the background
+// (settings, password and counters are kept). The installer restarts this web UI on the way.
+let UPD = null, UPD_WATCH = false;
+async function loadUpdate(force) {
+  const el = $("upd-status"), go = $("upd-go");
+  if (!UPD_WATCH) {
+    try { if ((await api("/api/update/status")).running) watchUpdate(null); } catch (e) {}
+  }
+  if (force) setMsg(el, "Checking GitHub…", "busy");
+  try { UPD = await api("/api/update/check" + (force ? "?force=1" : "")); } catch (e) { setMsg(el, e.message, "err"); return; }
+  go.hidden = !UPD.available;
+  el.className = "sub";
+  if (UPD.error) el.textContent = UPD.error;
+  else if (UPD.available) {
+    el.innerHTML = `Version <b>${esc(UPD.latest)}</b> is available (installed: ${esc(UPD.current)}). <a href="${esc(UPD.url)}" target="_blank" rel="noopener">What's new</a>`;
+    go.textContent = `Update to ${UPD.latest}…`;
+  } else el.textContent = `bobcat-gw is up to date (${UPD.current}).`;
+}
+$("upd-check").addEventListener("click", () => loadUpdate(true));
+$("upd-go").addEventListener("click", async () => {
+  if (!UPD || !UPD.available) return;
+  if (!(await confirmDialog({title: `Update to ${UPD.latest}?`, ok: "Update",
+    text: ["The gateway downloads the new version from GitHub and runs its installer. Settings, the password and the counters are kept.",
+           "LoRa traffic stops for a minute or two while the gateway services restart."]}))) return;
+  try { await api("/api/action", {action: "update", tag: UPD.latest}); } catch (err) { toast(err.message, "err"); return; }
+  watchUpdate(UPD.latest);
+});
+function watchUpdate(tag) {
+  UPD_WATCH = true;
+  const d = $("upd-dlg"), st = $("upd-state"), log = $("upd-log"), t0 = Date.now();
+  const busy = (text) => { st.className = "busy"; st.innerHTML = `${text} (${live("elapsed", t0 / 1000)})`; };
+  $("upd-title").textContent = tag ? `Updating to ${tag}` : "Updating bobcat-gw";
+  log.textContent = "";
+  busy("Downloading and installing…");
+  let finished = false;
+  $("upd-close").onclick = () => { d.close(); if (finished) location.reload(); };
+  d.showModal();
+  const poll = async () => {
+    let s = null, r = null;
+    try { r = await fetch("/api/update/status", {cache: "no-store", signal: AbortSignal.timeout(5000)}); if (r.ok) s = await r.json(); } catch (e) {}
+    if (r && r.status === 401) { location.reload(); return; }   // signed out: sign in, and this dialog comes back
+    if (!s) busy("The web UI is restarting…");
+    else {
+      const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+      log.textContent = s.log;
+      if (atEnd) log.scrollTop = log.scrollHeight;
+      if (!s.running && s.result === "ok") {
+        finished = true; st.className = "sub"; st.textContent = "Update finished. Reloading…";
+        setTimeout(() => location.reload(), 2500); return;
+      }
+      if (!s.running && (s.result === "failed" || Date.now() - t0 > 15000)) {
+        finished = true; st.className = "msg err";
+        st.textContent = s.result === "failed" ? "The update failed: see the log above. Trying again usually helps; the full log is in /var/log/bobcat-gw-update.log."
+                                               : "The update stopped unexpectedly. The log is in /var/log/bobcat-gw-update.log.";
+        return;
+      }
+      busy("Downloading and installing…");
+    }
+    if (Date.now() - t0 > 30 * 60 * 1000) { st.className = "msg err"; st.textContent = "The update is taking unusually long. Check /var/log/bobcat-gw-update.log over SSH."; return; }
+    setTimeout(poll, 2000);
+  };
+  setTimeout(poll, 1000);
+}
 $("pw-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   try { await api("/api/password", {current: $("pw-cur").value, new: $("pw-new").value}); setMsg($("pw-msg"), "Password changed for the web UI and root.", "ok"); $("pw-cur").value = $("pw-new").value = ""; }
@@ -1230,6 +1298,14 @@ start();
       <button class="btn primary" id="ssh-ok">Enable SSH</button>
     </div>
   </form>
+</dialog>
+<dialog class="modal" id="upd-dlg">
+  <div class="modal-body">
+    <h2 id="upd-title">Updating bobcat-gw</h2>
+    <p id="upd-state" class="busy">Downloading and installing…</p>
+    <pre class="log" id="upd-log"></pre>
+  </div>
+  <div class="modal-actions"><button class="btn" id="upd-close" type="button">Close</button></div>
 </dialog>
 <dialog class="modal" id="reboot-dlg">
   <div class="modal-body">

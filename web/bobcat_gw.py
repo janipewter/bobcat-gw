@@ -28,6 +28,7 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import urllib.request
 
 VERSION = "0.1.0"
 
@@ -1379,6 +1380,170 @@ def ssh_enable(key):
         raise RuntimeError("Could not start SSH: " + out.strip()[:160])
 
 
+# --------------------------------------------------------------------------
+# Updates from GitHub: the newest vX.Y.Z tag of GITHUB_REPO, installed with its own
+# install.sh (settings, password and totals are kept). The update runs as its own systemd
+# unit, because the installer restarts this web UI on the way.
+
+GITHUB_REPO = os.environ.get("BOBCAT_GW_REPO", "janipewter/bobcat-gw")
+SRC_DIR = "/opt/bobcat-gw-src"
+UPDATE_LOG = "/var/log/bobcat-gw-update.log"
+UPDATE_UNIT = "bobcat-gw-update"
+_update_cache = {"time": 0, "data": None}
+
+
+def parse_version(v):
+    m = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", str(v).strip())
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def update_check(force=False):
+    """Newest release tag on GitHub (cached for 10 minutes: GitHub's API is rate limited)."""
+    now = time.time()
+    if not force and _update_cache["data"] and now - _update_cache["time"] < 600:
+        return _update_cache["data"]
+    out = {"current": VERSION, "latest": None, "available": False, "error": "",
+           "url": f"https://github.com/{GITHUB_REPO}/releases"}
+    try:
+        req = urllib.request.Request(f"https://api.github.com/repos/{GITHUB_REPO}/tags?per_page=100",
+                                     headers={"User-Agent": f"bobcat-gw/{VERSION}",
+                                              "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            tags = json.load(r)
+        found = sorted((parse_version(t.get("name", "")), t["name"]) for t in tags if parse_version(t.get("name", "")))
+        if found:
+            out["latest"] = found[-1][1]
+            out["url"] = f"https://github.com/{GITHUB_REPO}/releases/tag/{found[-1][1]}"
+            out["available"] = found[-1][0] > parse_version(VERSION)
+        else:
+            out["error"] = "No releases have been published yet."
+    except Exception as e:  # network, DNS, rate limit, repository not found ...
+        out["error"] = f"Could not check GitHub: {e}"[:200]
+    _update_cache.update(time=now, data=out)
+    return out
+
+
+def update_running():
+    rc, out = run(["systemctl", "is-active", UPDATE_UNIT + ".service"], timeout=10)
+    return out.strip() in ("active", "activating")
+
+
+def update_status():
+    try:
+        with open(UPDATE_LOG) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        lines = []
+    result = None
+    for line in lines:
+        if line.startswith("Update to ") and line.endswith(" finished."):
+            result = "ok"
+        elif line.startswith("Update failed:"):
+            result = "failed"
+    return {"running": update_running(), "result": result, "log": "\n".join(lines[-25:])}
+
+
+def update_start(tag):
+    if update_running():
+        raise RuntimeError("An update is already running.")
+    if not parse_version(tag):
+        raise ValueError("Not a release version: " + str(tag)[:40])
+    with open(UPDATE_LOG, "w") as f:
+        f.write(f"Starting the update to {tag}\n")
+    rc, out = run(["systemd-run", f"--unit={UPDATE_UNIT}", "--collect", "--quiet",
+                   "/usr/bin/python3", os.path.abspath(__file__), "--update", tag], timeout=30)
+    if rc != 0:
+        raise RuntimeError("Could not start the update: " + out.strip()[:200])
+
+
+def _safe_extract(tar, dest):
+    """Extract a GitHub source archive, dropping its top folder, refusing odd paths."""
+    for m in tar.getmembers():
+        parts = m.name.split("/", 1)
+        if len(parts) < 2 or not parts[1]:
+            continue
+        rel = os.path.normpath(parts[1])
+        if rel.startswith("..") or os.path.isabs(rel) or m.issym() or m.islnk() or m.isdev():
+            raise RuntimeError(f"unexpected path in the archive: {m.name}")
+        m.name = rel
+        tar.extract(m, dest)
+
+
+def run_update(tag):
+    """The update itself (in the bobcat-gw-update unit): download, unpack, run install.sh."""
+    import shutil as _sh, tarfile, tempfile
+    log = open(UPDATE_LOG, "w", buffering=1)
+
+    def say(msg):
+        log.write(msg + "\n")
+        print(msg, flush=True)
+
+    say(f"bobcat-gw update: {VERSION} -> {tag} ({time.strftime('%Y-%m-%d %H:%M:%S')})")
+    url = f"https://github.com/{GITHUB_REPO}/archive/refs/tags/{tag}.tar.gz"
+    work = tempfile.mkdtemp(prefix="bobcat-gw-update.", dir="/var/tmp")
+    try:
+        say(f"Downloading {url}")
+        archive = os.path.join(work, "src.tar.gz")
+        req = urllib.request.Request(url, headers={"User-Agent": f"bobcat-gw/{VERSION}"})
+        with urllib.request.urlopen(req, timeout=60) as r, open(archive, "wb") as f:
+            _sh.copyfileobj(r, f)
+        new = os.path.join(work, "src")
+        with tarfile.open(archive) as tar:
+            _safe_extract(tar, new)
+        for need in ("install.sh", "web/bobcat_gw.py", "web/static/index.html"):
+            if not os.path.isfile(os.path.join(new, need)):
+                raise RuntimeError(f"the download has no {need}")
+        if os.path.isdir(SRC_DIR):
+            _sh.rmtree(SRC_DIR + ".old", ignore_errors=True)
+            os.rename(SRC_DIR, SRC_DIR + ".old")
+        _sh.move(new, SRC_DIR)
+        os.sync()
+        say("Running the installer (settings and password are kept)")
+        args = ["bash", os.path.join(SRC_DIR, "install.sh")] + ([] if _sh.which("tailscale") else ["--no-tailscale"])
+        p = subprocess.run(args, stdout=log, stderr=subprocess.STDOUT,
+                           env=dict(os.environ, BGW_DETACHED="1", DEBIAN_FRONTEND="noninteractive"))
+        if p.returncode != 0:
+            # The installer stops the LoRa backend early on: put the previous source back and
+            # start the backend again, so a failed update does not leave the gateway deaf.
+            say(f"The installer failed (exit {p.returncode}); starting the gateway services again")
+            if os.path.isdir(SRC_DIR + ".old"):
+                _sh.rmtree(SRC_DIR, ignore_errors=True)
+                os.rename(SRC_DIR + ".old", SRC_DIR)
+            subprocess.run(["/usr/bin/python3", os.path.abspath(__file__), "--init"], stdout=log, stderr=subprocess.STDOUT)
+            raise RuntimeError("the installer failed; see above")
+        _sh.rmtree(SRC_DIR + ".old", ignore_errors=True)
+        say(f"Update to {tag} finished.")
+        return 0
+    except Exception as e:
+        say(f"Update failed: {e}")
+        return 1
+    finally:
+        _sh.rmtree(work, ignore_errors=True)
+        log.close()
+
+
+def update_cli(args):
+    """bobcat-gw-update [--check]: check GitHub, and update to the newest release if there is one."""
+    c = update_check(force=True)
+    if c["error"]:
+        print(c["error"])
+        return 1
+    print(f"Installed: {VERSION}   newest on GitHub: {c['latest']}")
+    if not c["available"]:
+        print("bobcat-gw is up to date.")
+        return 0
+    if "--check" in args:
+        print(f"Run bobcat-gw-update to install {c['latest']}.")
+        return 0
+    update_start(c["latest"])
+    print(f"Updating in the background (unit {UPDATE_UNIT}); following {UPDATE_LOG}:")
+    time.sleep(1)
+    # follow the log until the update unit has finished
+    return subprocess.call(["sh", "-c", f"tail -n +1 -f {UPDATE_LOG} & t=$!; "
+                            f"while systemctl is-active --quiet {UPDATE_UNIT}.service; do sleep 2; done; "
+                            f"sleep 1; kill $t"])
+
+
 def system_info(hw):
     info = {"hostname": os.uname().nodename, "version": VERSION, "versions": hw.get("versions", {})}
     try:
@@ -1423,7 +1588,7 @@ class App:
         self.stats = Stats()
         self.net = Network()
         self.ts = Tailscale(self.store)
-        self.sessions = {}
+        self.sessions = load_sessions()
         self.login_failures = collections.deque(maxlen=20)
         self._units = ({}, {})
         self._units_time = 0
@@ -1467,6 +1632,27 @@ def lns_target(cfg):
 APP = None
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 SESSION_TTL = 7 * 24 * 3600
+SESSIONS_FILE = "/run/bobcat-gw/sessions.json"   # tmpfs: kept over a web UI restart, not a reboot
+
+
+def load_sessions():
+    try:
+        with open(SESSIONS_FILE) as f:
+            now = time.time()
+            return {k: v for k, v in json.load(f).items() if isinstance(v, (int, float)) and v > now}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def save_sessions(sessions):
+    try:
+        os.makedirs(os.path.dirname(SESSIONS_FILE), mode=0o700, exist_ok=True)
+        tmp = SESSIONS_FILE + ".tmp"
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            json.dump(dict(sessions), f)
+        os.replace(tmp, SESSIONS_FILE)
+    except OSError:
+        pass
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -1578,6 +1764,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json(APP.ts.status())
         if path == "/api/system":
             return self.send_json(system_info(APP.hw))
+        if path == "/api/update/check":
+            return self.send_json(update_check(force=q.get("force", ["0"])[0] == "1"))
+        if path == "/api/update/status":
+            return self.send_json(update_status())
         if path == "/api/ssh":
             return self.send_json(ssh_status())
         if path == "/api/time":
@@ -1608,6 +1798,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/api/logout":
             tok = self.session()
             APP.sessions.pop(tok, None)
+            save_sessions(APP.sessions)
             return self.send_json({"ok": True}, headers={"Set-Cookie": "bgw_session=; Max-Age=0; Path=/"})
         if not self.authed():
             return self.send_json({"error": "unauthorized"}, 401)
@@ -1648,6 +1839,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def start_session(self):
         tok = secrets.token_urlsafe(24)
         APP.sessions[tok] = time.time() + SESSION_TTL
+        save_sessions(APP.sessions)
         cookie = f"bgw_session={tok}; Max-Age={SESSION_TTL}; Path=/; HttpOnly; SameSite=Strict"
         self.send_json({"ok": True}, headers={"Set-Cookie": cookie})
 
@@ -1691,6 +1883,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         APP.store.save(cfg)
         root = set_root_password(pw)   # root's (SSH) password follows the web UI password
         APP.sessions = {self.session(): time.time() + SESSION_TTL} if self.session() else {}
+        save_sessions(APP.sessions)
         self.send_json({"ok": True, "root_password_synced": root})
 
     def action(self, body):
@@ -1710,6 +1903,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 os.sync()
                 run(["systemctl", "reboot"], timeout=30)
             threading.Thread(target=later, daemon=True).start()
+            return self.send_json({"ok": True})
+        if a == "update":
+            try:
+                update_start(str(body.get("tag", "")))
+            except (ValueError, RuntimeError) as e:
+                return self.send_json({"error": str(e)}, 400)
             return self.send_json({"ok": True})
         if a == "ssh_enable":
             try:
@@ -1796,6 +1995,10 @@ def main():
     import sys
     if "--init" in sys.argv:
         return init_config()
+    if "--update" in sys.argv:   # the update itself, in its own unit (see update_start)
+        sys.exit(run_update(sys.argv[sys.argv.index("--update") + 1]))
+    if "--update-cli" in sys.argv:
+        sys.exit(update_cli(sys.argv))
     APP = App()
     JournalFollower(APP.stats).start()
 

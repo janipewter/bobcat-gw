@@ -15,7 +15,7 @@
 </p>
 
 > [!WARNING]
-> **This project is vibe coded.** The code, the installer and this README were written by an AI coding assistant, directed and tested by a human on a single Bobcat 300 G285. It has not been reviewed line by line, and it has not been tested on other boards or setups. It works on that one gateway; use it at your own risk, and read `install.sh` before running it as root.
+> **This project is entirely vibes.** The code, the installer and this README were written by an AI coding assistant, directed and tested by a human on a single Bobcat 300 G285. It has not been reviewed line by line, and it has not been tested on other boards or setups. It works on that one gateway; use it at your own risk, and read `install.sh` before running it as root.
 
 > [!NOTE]
 > bobcat-gw is inspired by **[AdvdLaar/Bobcat300-TTN](https://github.com/AdvdLaar/Bobcat300-TTN)**, which first turned the Bobcat 300 into a The Things Network gateway with the Semtech UDP packet forwarder. bobcat-gw uses its G285 concentrator reset sequence, can import its settings, and builds on its approach of running everything from the microSD card.
@@ -35,6 +35,7 @@
   - recent packets with full ISO timestamps, RSSI and SNR
   - service logs, system health, and the gateway's time zone
 - **Remote access** through Tailscale, set up from the web UI.
+- **Updates from GitHub** with one click on the System tab (or `bobcat-gw-update` over SSH), keeping your settings.
 - **Boot protection**: the kernel, device tree and U-Boot packages are held, so `apt upgrade` can't replace them with versions that don't boot on the Bobcat.
 - **Nothing on the eMMC is touched.** Everything runs from the microSD card; remove the card and the Bobcat boots its original Helium firmware.
 
@@ -66,19 +67,19 @@ This writes `build/bobcat-gw-<version>-g285.img.xz`. The build only changes file
 To install on a Bobcat that already runs Bobcat-Armbian: on the gateway, as root (or with `sudo`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/bobcat-gw/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/janipewter/bobcat-gw/main/install.sh | sudo bash
 ```
 
 `wget -qO- <same URL> | sudo bash` works too. The script downloads the rest of the repository into `/tmp` and runs the installer from there. To pass options, add `-s --`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/bobcat-gw/main/install.sh | sudo bash -s -- --no-tailscale
+curl -fsSL https://raw.githubusercontent.com/janipewter/bobcat-gw/main/install.sh | sudo bash -s -- --no-tailscale
 ```
 
 Or clone the repository and run the installer from it:
 
 ```bash
-git clone https://github.com/OWNER/bobcat-gw.git
+git clone https://github.com/janipewter/bobcat-gw.git
 cd bobcat-gw
 sudo ./install.sh
 ```
@@ -106,7 +107,7 @@ Options:
 | `--build-on-device` | Compile the packet forwarder and Basics Station on the gateway instead of using the prebuilt binaries (very slow) |
 | `--force` | Install on a board that isn't a G285 (also set `SPI_DEV=`) |
 
-The one-line install downloads `OWNER/bobcat-gw` at `main`; set `BOBCAT_GW_REPO=you/your-fork` or `BOBCAT_GW_REF=<branch or tag>` (for example `curl ... | sudo BOBCAT_GW_REF=v0.1.0 bash`) to install something else.
+The one-line install downloads `janipewter/bobcat-gw` at `main`; set `BOBCAT_GW_REPO=you/your-fork` or `BOBCAT_GW_REF=<branch or tag>` (for example `curl ... | sudo BOBCAT_GW_REF=v0.1.0 bash`) to install something else.
 
 **Coming from Bobcat300-TTN?** Its server address and region are imported. Its gateway EUI is not (see [Gateway EUI](#gateway-eui)), so register the gateway again with the new EUI.
 
@@ -119,7 +120,7 @@ Open `http://<gateway-ip>/` and sign in.
 | **Dashboard** | Connection state, packet counters, the 24-hour chart, and recent packets |
 | **LNS** | Connection method (or monitor only), preset, region, and for US915/AU915 the sub-band. Saving restarts the backend with the new settings. |
 | **Network** | The Ethernet interface, and Tailscale |
-| **System** | Health, boot protection status, time sync and time zone, service logs, restarting the services, rebooting, SSH on/off, and the password (for the web UI and root) |
+| **System** | Health, updates, boot protection status, time sync and time zone, service logs, restarting the services, rebooting, SSH on/off, and the password (for the web UI and root) |
 
 ### The Things Network
 
@@ -134,6 +135,19 @@ Use the gateway EUI shown in the web UI, and the cluster (`eu1`, `nam1`, `au1`) 
 ### ChirpStack over MQTT
 
 Point the forwarder at your ChirpStack MQTT broker and set the topic prefix to the ChirpStack region ID (`eu868`, `us915_1`, ...). The gateway publishes to `<prefix>/gateway/<eui>/event/up` like any other ChirpStack gateway.
+
+## Updating
+
+The System tab checks GitHub for a newer release (the highest `vX.Y.Z` tag of this repository). If there is one, **Update to vX.Y.Z** downloads it and runs its installer in the background, with the progress shown in a window. Settings, the password, the packet counters and the gateway EUI are kept. LoRa traffic stops for a minute or so while the services restart, and the page reloads when the update is done. There's no need to reflash the SD card.
+
+Over SSH, the same thing:
+
+```bash
+bobcat-gw-update --check   # just check
+bobcat-gw-update           # update to the newest release
+```
+
+The update's log is `/var/log/bobcat-gw-update.log`. If the installer fails, the updater puts the previous source back in `/opt/bobcat-gw-src` and starts the LoRa services again, so the gateway carries on. An update doesn't add Tailscale if it isn't installed already.
 
 ## Gateway EUI
 
@@ -195,6 +209,15 @@ sudo tools/build-binaries.sh
 
 The script links against Debian 12's libc, so the binaries run on the gateway even if the build machine's libc is newer, and it refuses to finish if a binary needs a newer glibc than Debian 12 has. `prebuilt/aarch64/BUILDINFO` records the versions and checksums.
 
+### Making a release
+
+The updater offers the highest `vX.Y.Z` tag, so a release is:
+
+1. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), and commit.
+2. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
+
+A GitHub release with notes is optional; the **What's new** link on the System tab opens the tag's page either way.
+
 ## Limitations
 
 - Tested on one G285 only. The G280 (SX1301) isn't supported; the G29x uses a different SPI device and is untested.
@@ -208,5 +231,6 @@ The script links against Debian 12's libc, so the binaries run on the gateway ev
 
 - **[AdvdLaar/Bobcat300-TTN](https://github.com/AdvdLaar/Bobcat300-TTN)**: the inspiration for this project, the original Bobcat 300 TTN conversion, and the G285 reset sequence.
 - [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian): Armbian for the Bobcat 300.
-- [metrafonic/Bobcat300-DebianMinimalDocker](https://github.com/metrafonic/Bobcat300-DebianMinimalDocker) and r00t1ng: the LDO reset script.
-- [Basics Station](https://github.com/lorabasics/basicstation), Semtech [sx1302_hal](https://github.com/Lora-net/sx1302_hal), and the [ChirpStack MQTT Forwarder](https://github.com/chirpstack/chirpstack-mqtt-forwarder).
+- [metrafonic/Bobcat300-DebianMinimalDocker](https://github.com/metrafonic/Bobcat300-DebianMinimalDocker) and r00t1ng: earlier work on the concentrator reset.
+- [Basics Station](https://github.com/lorabasics/basicstation), Semtech [sx1302_hal](https://github.com/Lora-net/sx1302_hal), and the [ChirpStack MQTT Forwarder](https://github.com/chirpstack/chirpstack-mqtt-forwarder). Their licences are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- [Claude Code](https://claude.com/claude-code): wrote the code.
