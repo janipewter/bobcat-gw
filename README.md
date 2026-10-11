@@ -139,7 +139,7 @@ Open `http://<gateway-ip>/` (or `http://<hostname>.local/`) and sign in.
 
 Use the gateway EUI shown in the web UI, and the cluster (`eu1`, `nam1`, `au1`) you registered on. TTN doesn't accept gateways over MQTT; use MQTT with ChirpStack.
 
-**Location:** with Semtech UDP (and MQTT), the latitude, longitude and altitude set on the LNS tab go to the network server in the gateway's status messages. On TTN, tick **Update from status messages** on the gateway's Location page to use them. Basics Station has no way to report a location, so set it in the TTN console. With Basics Station, the gateway reports its version to TTN as `bobcat-gw <version>`.
+**Location:** set the gateway's location in the TTN console. The location on bobcat-gw's LNS tab can't reach TTN: TTN only takes locations from status messages over authenticated connections, not from UDP gateways, and Basics Station has no way to send one. (With MQTT or UDP, the location does go into the status messages, which ChirpStack can use.) With Basics Station, the gateway reports its version to TTN as `bobcat-gw <version>`.
 
 ### ChirpStack over MQTT
 

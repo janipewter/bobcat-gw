@@ -333,7 +333,7 @@ body.login-mode { background:
         <div class="w-s"><label for="loc-lon">Longitude</label><input type="text" id="loc-lon" class="w-s" inputmode="decimal" placeholder="e.g. -0.1276" autocomplete="off"></div>
         <div class="w-xs"><label for="loc-alt">Altitude (m)</label><input type="text" id="loc-alt" class="w-xs" inputmode="numeric" placeholder="optional" autocomplete="off"></div>
       </div>
-      <div class="hint" style="max-width:42rem">Where the gateway is, in decimal degrees (right-click a spot in Google Maps or OpenStreetMap to copy them). With Semtech UDP and MQTT it is sent to the network server in the gateway's status messages; on TTN, also tick "Update from status messages" on the gateway's Location page. Basics Station can't send a location, so set it in the network server's console too.</div>
+      <div class="hint" style="max-width:42rem">Where the gateway is, in decimal degrees (right-click a spot in Google Maps or OpenStreetMap to copy them). With Semtech UDP and MQTT it goes into the gateway's status messages, which ChirpStack uses for the gateway's location. TTN ignores locations from UDP gateways and Basics Station can't send one, so on TTN set the location in the console.</div>
 
       <h2 style="margin-top:26px">Network server</h2>
       <label>Connection method</label>
