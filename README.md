@@ -12,11 +12,12 @@
   <img alt="LoRaWAN: ChirpStack" src="https://img.shields.io/badge/LoRaWAN-ChirpStack-0d83d0?labelColor=555">
   <img alt="Backends: Basics Station, packet forwarder, MQTT" src="https://img.shields.io/badge/Backends-Basics%20Station%20%7C%20Packet%20Forwarder%20%7C%20MQTT-2ea44f?labelColor=555">
   <img alt="Remote access: Tailscale" src="https://img.shields.io/badge/Remote%20access-Tailscale-242424?logo=tailscale&logoColor=white&labelColor=555">
+  <img alt="Status: alpha" src="https://img.shields.io/badge/Status-alpha-orange?labelColor=555">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow?labelColor=555"></a>
 </p>
 
 > [!WARNING]
-> **This project is entirely vibes.** The code, the installer and this README were written by an AI coding assistant, directed and tested by a human on a single Bobcat 300 G285. It has not been reviewed line by line, and it has not been tested on other boards or setups. It works on that one gateway; use it at your own risk, and read `install.sh` before running it as root.
+> **This project is entirely vibes, and it's an alpha.** The code, the installer and this README were written by an AI coding assistant, directed and tested by a human on a single Bobcat 300 G285. It has not been reviewed line by line, and it has not been tested on other boards or setups. It works on that one gateway; use it at your own risk, and read `install.sh` before running it as root.
 
 > [!NOTE]
 > bobcat-gw is inspired by **[AdvdLaar/Bobcat300-TTN](https://github.com/AdvdLaar/Bobcat300-TTN)**, which first turned the Bobcat 300 into a The Things Network gateway with the Semtech UDP packet forwarder. bobcat-gw uses its G285 concentrator reset sequence, can import its settings, and builds on its approach of running everything from the microSD card.
