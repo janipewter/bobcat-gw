@@ -28,6 +28,12 @@ for _ in $(seq 1 60); do
     getent hosts deb.debian.org >/dev/null 2>&1 && break
     sleep 2
 done
+# HTTPS downloads (Tailscale) need the right time, and the board starts in 2017 until NTP
+# syncs (no battery-backed clock): wait up to 3 minutes for chrony.
+if getent hosts deb.debian.org >/dev/null 2>&1; then
+    timeout 180 chronyc waitsync 18 1 >/dev/null 2>&1 || true
+    echo "Clock: $(date -Is)$([ "$(date +%Y)" -lt 2025 ] && echo ' (not synced yet: HTTPS downloads may fail)')"
+fi
 
 for attempt in 1 2 3; do
     if BGW_DETACHED=1 bash /opt/bobcat-gw-src/install.sh --default-password; then
