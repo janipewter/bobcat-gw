@@ -676,6 +676,7 @@ class Stats:
         self.started_mono = time.monotonic()  # not wall time: the clock may still be wrong
         self.counters = collections.Counter()
         self.packets = collections.deque(maxlen=100)
+        self.devices = set()  # DevAddrs heard this boot (data frames with a good CRC)
         self.events = collections.deque(maxlen=50)
         self.hourly = {}  # hour epoch -> [up, down]
         self.sources = {k: Source() for k in UNITS}
@@ -715,6 +716,9 @@ class Stats:
             self.packets.appendleft(pkt)
             self.counters["uplinks"] += 1
             self.counters["last_uplink"] = ts
+            # pktfwd reports bad-CRC frames too (stat -1); their DevAddr is noise
+            if pkt.get("dev_addr") and pkt.get("crc", 1) == 1 and len(self.devices) < 100000:
+                self.devices.add(pkt["dev_addr"])
         self.totals.count("up", ts, *self._entry)
         self._bucket(ts, 0)
 
@@ -978,6 +982,7 @@ class Stats:
                 series.append({"t": h, "up": up, "down": down})
             return {
                 "counters": dict(self.counters),
+                "devices_boot": len(self.devices),
                 "packets": list(self.packets)[:50],
                 "events": list(self.events)[:20],
                 "hourly": series,

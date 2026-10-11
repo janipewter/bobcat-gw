@@ -779,7 +779,8 @@ function renderDash(s) {
   const bootTxt = "since boot " + shortDate(t.boot_time);
   const totalTxt = (n) => fmtNum(n) + " total" + (t.total_since ? " since " + shortDate(t.total_since) : "");
   $("d-up").textContent = fmtNum(t.boot_up);
-  $("d-up-sub").textContent = bootTxt;
+  const nd = s.devices_boot;
+  $("d-up-sub").innerHTML = esc(bootTxt) + (nd ? `<br><span title="Distinct device addresses (DevAddr) heard since boot, including devices on other networks nearby">from ${fmtNum(nd)} device${nd === 1 ? "" : "s"}</span>` : "");
   $("d-up-total").textContent = totalTxt(t.total_up);
   if (s.backend === "monitor") {
     $("d-down").textContent = "—";

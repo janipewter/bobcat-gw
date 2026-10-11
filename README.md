@@ -33,7 +33,7 @@
 - **Monitor only mode**: receive and show packets (device address, frame counter, RSSI, SNR) without forwarding anything, to check the antenna and coverage before registering the gateway.
 - **Web UI** with live statistics:
   - LNS connection state and region
-  - uplink and downlink counts since boot and in total
+  - uplink and downlink counts since boot and in total, and how many devices the uplinks came from
   - a 24-hour packets-per-hour chart
   - recent packets with full ISO timestamps, RSSI and SNR
   - service logs, system health, time sync status, and the gateway's time zone
