@@ -147,7 +147,7 @@ Point the forwarder at your ChirpStack MQTT broker and set the topic prefix to t
 
 ## Updating
 
-The gateway checks GitHub for a newer release (the highest `vX.Y.Z` tag of this repository) a couple of minutes after it starts and then twice a day. When there is one, the web UI's header shows **Update available**; nothing is installed until you choose to. On the System tab, **Update to vX.Y.Z** downloads it and runs its installer in the background, with the progress shown in a window. Settings, the password, the packet counters and the gateway EUI are kept. LoRa traffic stops for a minute or so while the services restart, and the page reloads when the update is done. There's no need to reflash the SD card.
+The gateway checks GitHub for a newer release (the highest `vX.Y.Z` tag of this repository) a couple of minutes after it starts and then once a day. When there is one, the web UI's header shows **Update available**; nothing is installed until you choose to. On the System tab, **Update to vX.Y.Z** downloads it and runs its installer in the background, with the progress shown in a window. Settings, the password, the packet counters and the gateway EUI are kept. LoRa traffic stops for a minute or so while the services restart, and the page reloads when the update is done. There's no need to reflash the SD card.
 
 Over SSH, the same thing:
 
@@ -225,7 +225,7 @@ The script links against Debian 12's libc, so the binaries run on the gateway ev
 The updater offers the highest `vX.Y.Z` tag, so a release is:
 
 1. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), and commit.
-2. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin main vX.Y.Z`. Gateways see it within 12 hours, or straight away with **Check now**.
+2. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin main vX.Y.Z`. Gateways see it within a day, or straight away with **Check now**.
 3. Optionally, build the image from the tag (`tools/build-image.sh`) and attach it with its `.sha256` to a GitHub release, marked as a pre-release while the project is an alpha.
 
 The **What's new** link on the System tab opens the tag's page, with or without a GitHub release.

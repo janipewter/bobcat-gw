@@ -1481,7 +1481,7 @@ def update_check(force=False):
     """Newest release tag on GitHub. update_checker() refreshes it in the background, so
     without force the cached answer is used (GitHub's API is rate limited)."""
     now = time.time()
-    if not force and _update_cache["data"] and now - _update_cache["time"] < 13 * 3600:
+    if not force and _update_cache["data"] and now - _update_cache["time"] < 25 * 3600:
         return _update_cache["data"]
     out = {"current": VERSION, "latest": None, "available": False, "error": "", "checked": now,
            "url": f"https://github.com/{GITHUB_REPO}/releases"}
@@ -1506,7 +1506,7 @@ def update_check(force=False):
 
 def update_checker():
     """Background check, so the web UI can say when an update is available (installing it is
-    always the user's choice): soon after start, then twice a day. HTTPS needs the right time,
+    always the user's choice): soon after start, then once a day. HTTPS needs the right time,
     and the board starts in 2017 until NTP has synced, so wait for that first."""
     time.sleep(120)
     while True:
@@ -1514,7 +1514,7 @@ def update_checker():
             time.sleep(300)
             continue
         c = update_check(force=True)
-        time.sleep(3600 if c["error"] else 12 * 3600)   # offline or no releases: try again hourly
+        time.sleep(3600 if c["error"] else 24 * 3600)   # offline or no releases: try again hourly
 
 
 def update_running():
