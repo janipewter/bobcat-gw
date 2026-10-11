@@ -1,6 +1,6 @@
 # Third-party notices
 
-bobcat-gw ships, or installs, software by others. This file lists that software and its licences.
+bobcat-gw itself is under the MIT License (see [LICENSE](LICENSE)). It also ships, or installs, software by others; this file lists that software and its licences.
 
 | Component | Version | Used as | Licence |
 |---|---|---|---|

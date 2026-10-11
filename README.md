@@ -12,6 +12,7 @@
   <img alt="LoRaWAN: ChirpStack" src="https://img.shields.io/badge/LoRaWAN-ChirpStack-0d83d0?labelColor=555">
   <img alt="Backends: Basics Station, packet forwarder, MQTT" src="https://img.shields.io/badge/Backends-Basics%20Station%20%7C%20Packet%20Forwarder%20%7C%20MQTT-2ea44f?labelColor=555">
   <img alt="Remote access: Tailscale" src="https://img.shields.io/badge/Remote%20access-Tailscale-242424?logo=tailscale&logoColor=white&labelColor=555">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow?labelColor=555"></a>
 </p>
 
 > [!WARNING]
@@ -234,3 +235,7 @@ A GitHub release with notes is optional; the **What's new** link on the System t
 - [metrafonic/Bobcat300-DebianMinimalDocker](https://github.com/metrafonic/Bobcat300-DebianMinimalDocker) and r00t1ng: earlier work on the concentrator reset.
 - [Basics Station](https://github.com/lorabasics/basicstation), Semtech [sx1302_hal](https://github.com/Lora-net/sx1302_hal), and the [ChirpStack MQTT Forwarder](https://github.com/chirpstack/chirpstack-mqtt-forwarder). Their licences are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - [Claude Code](https://claude.com/claude-code): wrote the code.
+
+## License
+
+bobcat-gw is released under the [MIT License](LICENSE). The binaries and software it bundles or installs keep their own licences; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
