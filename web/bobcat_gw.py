@@ -704,6 +704,17 @@ class Totals:
         self.saved = time.monotonic()
 
 
+# Harmless messages kept off the dashboard's warnings list, where they would crowd out the
+# ones that matter (they stay in the service logs): the HAL meeting a corrupted frame with
+# coding rate 0, and Basics Station's clock-drift estimate briefly leaving its adaptive
+# threshold, which it handles by measuring again.
+QUIET_MESSAGES = ("wrong coding rate (0)", "Repeated excessive clock drifts")
+
+
+def quiet(text):
+    return any(q in text for q in QUIET_MESSAGES)
+
+
 class Stats:
     HOURS = 48
 
@@ -853,7 +864,7 @@ class Stats:
         elif "failed to start the concentrator" in line:
             self.concentrator.update(state="error", detail=line, since=ts)
             self.event(ts, "pktfwd", "error", line)
-        elif line.startswith("ERROR"):
+        elif line.startswith("ERROR") and not quiet(line):
             self.event(ts, "pktfwd", "error", line)
             if "getaddrinfo" in line or "socket" in line.lower():
                 src.set("error", line, ts)
@@ -946,6 +957,8 @@ class Stats:
         elif mod == "RAL" and level in ("ERRO", "CRIT"):
             self.concentrator.update(state="error", detail=text, since=ts)
             self.event(ts, "station", "error", text)
+        elif quiet(text):
+            pass
         elif level in ("ERRO", "CRIT"):
             self.event(ts, "station", "error", f"[{mod}] {text}")
             if mod in ("TCE", "AIO", "CUP", "WSC", "TLS"):
