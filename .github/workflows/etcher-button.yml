@@ -1,0 +1,58 @@
+# Points the README's "Flash with Etcher" button at the newest release's image.
+# The image file name has the version in it, so the button names one release's image and this
+# keeps it current.
+name: Etcher button
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to point the button at (vX.Y.Z)
+        required: true
+
+permissions:
+  contents: write
+
+concurrency: etcher-button
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Point the button at the release's image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION=${TAG#v}
+          IMAGE="bobcat-gw-$VERSION-g285.img.xz"
+          if ! gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$IMAGE"; then
+            echo "Release $TAG has no $IMAGE: leaving the button alone."
+            exit 0
+          fi
+          CURRENT=$(sed -n 's|.*releases/download/v\([0-9.]*\)/bobcat-gw-.*-g285\.img\.xz).*|\1|p' README.md | head -1)
+          [ -n "$CURRENT" ] || { echo "::error::Flash with Etcher button not found in README.md"; exit 1; }
+          if [ "$CURRENT" = "$VERSION" ]; then
+            echo "Button already points at $VERSION."
+            exit 0
+          fi
+          if [ "$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+            echo "Button points at $CURRENT, newer than $VERSION: leaving it."
+            exit 0
+          fi
+          sed -i \
+            -e "s|releases/download/v$CURRENT/bobcat-gw-$CURRENT-g285\.img\.xz|releases/download/$TAG/$IMAGE|" \
+            -e "s|the latest image ($CURRENT)|the latest image ($VERSION)|" \
+            README.md
+          git diff --stat
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "README: Flash with Etcher button for $VERSION"
+          git push origin main
