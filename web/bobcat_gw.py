@@ -985,6 +985,22 @@ class Stats:
             self.event(ts, "mqtt", "error" if " ERROR " in line else "warning",
                        line.split("]", 1)[-1].strip())
 
+    def restore_link(self, key, entry):
+        """Connection state from a line older than the 24 h replay (see JournalFollower)."""
+        msg = entry.get("MESSAGE")
+        if not isinstance(msg, str):
+            return
+        ts = entry_time(entry)
+        with self.lock:
+            src = self.sources[key]
+            if any(s in msg for s in LINK_UP):
+                src.last_ok = ts
+                src.set("connected", "", ts)
+            elif "Connecting to" in msg:
+                src.set("connecting", msg, ts)
+            else:
+                src.set("disconnected", msg.split("]", 1)[-1].strip(), ts)
+
     # ---- views
 
     def lns_status(self, backend, unit_states):
@@ -1043,12 +1059,36 @@ class Stats:
             }
 
 
+# Log lines that report a backend's connection. Basics Station and the MQTT Forwarder log
+# them only when they (re)connect, so a link that has been up for days isn't in the replay.
+LINK_LINES = {
+    "station": "Connected to MUXS|Connecting to MUXS|Connecting to INFOS|\\[(TCE|AIO|CUP|WSC|TLS):(ERRO|CRIT)\\]",
+    "mqtt": "Subscribing to command topic|Sending conn state|Connection error|MQTT error",
+}
+LINK_UP = ("Connected to MUXS", "Subscribing to command topic", "Sending conn state")
+
+
 class JournalFollower(threading.Thread):
     """Replays the last 24 h of backend logs, then follows them."""
 
     def __init__(self, stats):
         super().__init__(daemon=True)
         self.stats = stats
+
+    def _restore_links(self):
+        """Last connection line of each backend's current run, however old."""
+        for key, pattern in LINK_LINES.items():
+            rc, out = run(["systemctl", "show", "-p", "InvocationID", "--value", UNITS[key]])
+            inv = out.strip()
+            if rc != 0 or not inv:
+                continue
+            rc, out = run(["journalctl", "-o", "json", "--no-pager", "-n", "1", "--grep", pattern,
+                           "-u", UNITS[key], f"_SYSTEMD_INVOCATION_ID={inv}"])
+            for raw in out.splitlines():
+                try:
+                    self.stats.restore_link(key, json.loads(raw))
+                except ValueError:
+                    pass
 
     def _stream(self, args, follow, skip_this_boot=False):
         cmd = ["journalctl", "-o", "json", "--no-pager"] + (["-f"] if follow else []) + args
@@ -1078,6 +1118,7 @@ class JournalFollower(threading.Thread):
             self._stream(["--since", "-24h"] + units, follow=False, skip_this_boot=True)
             args = ["-b", "--lines=all"]  # with -f, journalctl otherwise shows only the last 10 lines
         else:
+            self._restore_links()  # the replay below then updates it with anything newer
             args = ["--since", "-24h"]
         while True:
             self._stream(args + units, follow=True)
