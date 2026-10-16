@@ -53,9 +53,9 @@
 
 The quickest way: flash a ready-made SD card image and boot straight into the gateway.
 
-[![Flash with Etcher](https://balena.io/flash-with-etcher.png)](https://efp.balena.io/open-image-url?imageUrl=https://github.com/janipewter/bobcat-gw/releases/download/v0.1.2/bobcat-gw-0.1.2-g285.img.xz)
+[![Flash with Etcher](https://balena.io/flash-with-etcher.png)](https://efp.balena.io/open-image-url?imageUrl=https://github.com/janipewter/bobcat-gw/releases/download/v0.1.3/bobcat-gw-0.1.3-g285.img.xz)
 
-With [Balena Etcher](https://etcher.balena.io/) installed, the button opens it with the latest image (0.1.2) selected: pick your microSD card and flash. Then continue at step 2.
+With [Balena Etcher](https://etcher.balena.io/) installed, the button opens it with the latest image (0.1.3) selected: pick your microSD card and flash. Then continue at step 2.
 
 1. Download `bobcat-gw-<version>-g285.img.xz` from the [releases page](https://github.com/janipewter/bobcat-gw/releases) and flash it to a microSD card (8 GB or more) with [Balena Etcher](https://etcher.balena.io/) or `dd`. The `.sha256` file next to it lets you check the download.
 2. Put the card in the Bobcat, connect Ethernet, and power it on.
