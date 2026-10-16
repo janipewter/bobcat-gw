@@ -65,6 +65,9 @@ main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 .s-off .dot { background: var(--muted); }
 .link-btn { background: none; border: 0; padding: 0; margin-left: 8px; font: inherit; font-size: 13px; color: var(--accent); cursor: pointer; }
 .link-btn:hover { text-decoration: underline; }
+.icon-btn { background: none; border: 0; padding: 2px; margin-left: 6px; color: var(--muted); cursor: pointer; vertical-align: -2px; border-radius: 4px; line-height: 0; }
+.icon-btn:hover, .icon-btn:focus-visible { color: var(--accent); }
+.icon-btn svg { width: 14px; height: 14px; }
 .upd-pill { cursor: pointer; font: inherit; font-size: 12px; color: var(--accent); border-color: var(--accent); }
 .upd-pill:hover { background: var(--accent); color: var(--accent-ink); }
 .pill { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--border); }
@@ -1107,7 +1110,7 @@ async function loadSystem() {
     $("s-info").innerHTML = [["Hostname", s.hostname], ["Uptime", uptime], ["Load", (s.load || []).join(" ")],
       ["CPU temperature", s.cpu_temp != null ? s.cpu_temp + " °C" : ""], ["Memory", s.mem ? `${s.mem.used_mb} / ${s.mem.total_mb} MB` : ""],
       ["SD card", s.disk ? `${s.disk.used_gb} / ${s.disk.total_gb} GB` : ""],
-      ...Object.entries(v)].map(([k, val]) => `<dt>${esc(k)}</dt><dd>${k === "Uptime" ? val : esc(val)}${k === "Hostname" ? `<button type="button" class="link-btn" id="host-edit">Change</button>` : ""}</dd>`).join("");
+      ...Object.entries(v)].map(([k, val]) => `<dt>${esc(k)}</dt><dd>${k === "Uptime" ? val : esc(val)}${k === "Hostname" ? `<button type="button" class="icon-btn" id="host-edit" title="Change hostname" aria-label="Change hostname"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></button>` : ""}</dd>`).join("");
     $("upd-ver").textContent = s.version;
     const h = s.holds;
     $("s-holds").innerHTML = (h.missing.length
