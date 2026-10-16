@@ -9,7 +9,7 @@
 #    or: curl -fsSL https://raw.githubusercontent.com/janipewter/bobcat-gw/main/install.sh | sudo bash -s -- [options]
 set -euo pipefail
 
-VERSION="0.1.2"
+VERSION="0.1.3"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP=/opt/bobcat-gw
 CONF=/etc/bobcat-gw
