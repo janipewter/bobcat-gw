@@ -345,7 +345,9 @@ def station_conf(cfg, hw):
             "RX_POLL_INTV": "10ms",
             "TC_TIMEOUT": "360s",
             "log_file": "stderr",
-            "log_level": "VERBOSE",
+            # VERBOSE for the RX/TX lines the dashboard reads; the clock sync (SYN) logs
+            # several lines every few seconds, so only its warnings.
+            "log_level": "VERBOSE,SYN:WARN",
             "log_size": 10000000,
             "log_rotate": 3,
         },
