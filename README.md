@@ -224,9 +224,10 @@ The script links against Debian 12's libc, so the binaries run on the gateway ev
 
 The updater offers the highest `vX.Y.Z` tag, so a release is:
 
-1. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), and commit.
-2. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin main vX.Y.Z`. Gateways see it within a day, or straight away with **Check now**.
-3. Build the image from the tag (`tools/build-image.sh`, in a fresh clone of the tag) and attach it with its `.sha256` to a GitHub release for the tag, marked as a pre-release while the project is an alpha. Every release gets an image.
+1. Run `tools/check-base-image.sh`. If [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) has a new G285 image, test it on a gateway, then update `image/BASE_IMAGE` and commit it.
+2. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), and commit.
+3. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin main vX.Y.Z`. Gateways see it within a day, or straight away with **Check now**.
+4. Build the image from the tag (`tools/build-image.sh`, in a fresh clone of the tag) and attach it with its `.sha256` to a GitHub release for the tag, marked as a pre-release while the project is an alpha. Every release gets an image.
 
 The **What's new** link on the System tab opens the tag's page, with or without a GitHub release.
 

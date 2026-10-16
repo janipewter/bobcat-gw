@@ -29,8 +29,13 @@ OUT=${2:-$REPO/build/bobcat-gw-$VERSION-g285.img.xz}
 die() { echo "ERROR: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
 [ "$(id -u)" -eq 0 ] || die "run as root (loop devices and mounts)"
-for t in losetup mount xz curl dpkg-deb blkid; do command -v "$t" >/dev/null || die "missing tool: $t"; done
+for t in losetup mount xz curl dpkg-deb blkid sha256sum; do command -v "$t" >/dev/null || die "missing tool: $t"; done
 [ -f "$IN" ] || die "no such file: $IN"
+BASE_SHA=$(sed -n 's/^SHA256=//p' "$REPO/image/BASE_IMAGE")
+if [ "$(sha256sum "$IN" | cut -d' ' -f1)" != "$BASE_SHA" ]; then
+    echo "WARNING: $(basename "$IN") is not the base image in image/BASE_IMAGE (tools/check-base-image.sh)." >&2
+    echo "         Fine for a test build; a release must use the recorded one." >&2
+fi
 
 WORK=$(mktemp -d /var/tmp/bobcat-gw-image.XXXXXX)
 LOOP=""

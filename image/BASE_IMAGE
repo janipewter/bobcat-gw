@@ -1,0 +1,7 @@
+# The Bobcat-Armbian G285 image that the ready-made image is built from.
+# tools/check-base-image.sh compares this with upstream; tools/build-image.sh checks its input against it.
+# Upstream replaces the file in its "1.0" release in place, so the checksum is what identifies a version.
+URL=https://github.com/sicXnull/Bobcat-Armbian/releases/download/1.0/BobcatArmbian285.img.xz
+SHA256=a75f1ca460f982ad435aa7fd8d94cb24192a64bdf855fc5610a0eb9f82195270
+UPDATED=2026-01-19T00:09:33Z
+ARMBIAN=26.02.0-trunk
