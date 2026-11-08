@@ -27,6 +27,7 @@ import socketserver
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -1589,7 +1590,7 @@ def update_status():
         if line.startswith("Update to ") and line.endswith(" finished."):
             result = "ok"
         elif line.startswith("Update failed:"):
-            result = "failed"
+            result = "rolled_back" if any(l.startswith("Back on ") for l in lines) else "failed"
     return {"running": update_running(), "result": result, "log": "\n".join(lines[-25:])}
 
 
@@ -1619,8 +1620,71 @@ def _safe_extract(tar, dest):
         tar.extract(m, dest)
 
 
+def _unit_state(unit):
+    """(ActiveState, NRestarts) of a systemd unit."""
+    rc, out = run(["systemctl", "show", "-p", "ActiveState", "-p", "NRestarts", unit], timeout=15)
+    props = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    try:
+        restarts = int(props.get("NRestarts", "0") or 0)
+    except ValueError:
+        restarts = 0
+    return props.get("ActiveState", ""), restarts
+
+
+def _web_answers():
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{WEB_PORT}/", timeout=10) as r:
+            return r.status < 500
+    except urllib.error.HTTPError as e:
+        return e.code < 500
+    except Exception:
+        return False
+
+
+def running_backends():
+    """The LoRa backend units running now."""
+    return {u for u in UNITS.values() if _unit_state(u)[0] == "active"}
+
+
+def health_problem(backends, wait=180, settle=30):
+    """After an update: None if the web UI answers and the LoRa backend runs, else what is wrong.
+
+    This runs in the version being updated from (its code is already loaded), so a broken new
+    version cannot break the check. Only backend units that ran before the update
+    (`backends`) and are still enabled (apply_backend enables what the configuration needs)
+    are required, so a backend that was already failing does not undo every update. They must
+    come up within `wait` seconds and then stay up for `settle` seconds without restarts."""
+    units = ["bobcat-gw-web.service"]
+    for u in sorted(backends):
+        rc, out = run(["systemctl", "is-enabled", u], timeout=15)
+        if out.strip() == "enabled":
+            units.append(u)
+    deadline = time.time() + wait
+    while True:
+        down = [u for u in units if _unit_state(u)[0] != "active"]
+        if down:
+            problem = ", ".join(down) + " not running"
+        elif not _web_answers():
+            problem = f"the web UI does not answer on port {WEB_PORT}"
+        else:
+            break
+        if time.time() > deadline:
+            return problem
+        time.sleep(5)
+    restarts = {u: _unit_state(u)[1] for u in units}
+    time.sleep(settle)
+    for u in units:
+        state, n = _unit_state(u)
+        if state != "active" or n != restarts[u]:
+            return f"{u} keeps stopping (restarted {n - restarts[u]} times in {settle} s)"
+    if not _web_answers():
+        return f"the web UI stopped answering on port {WEB_PORT}"
+    return None
+
+
 def run_update(tag):
-    """The update itself (in the bobcat-gw-update unit): download, unpack, run install.sh."""
+    """The update itself (in the bobcat-gw-update unit): download, unpack, run install.sh, check
+    that the new version works, and go back to this version if it doesn't."""
     import shutil as _sh, tarfile, tempfile
     log = open(UPDATE_LOG, "w", buffering=1)
 
@@ -1628,8 +1692,37 @@ def run_update(tag):
         log.write(msg + "\n")
         print(msg, flush=True)
 
+    def install(src):
+        args = ["bash", os.path.join(src, "install.sh")] + ([] if _sh.which("tailscale") else ["--no-tailscale"])
+        return subprocess.run(args, stdout=log, stderr=subprocess.STDOUT,
+                              env=dict(os.environ, BGW_DETACHED="1", DEBIAN_FRONTEND="noninteractive")).returncode
+
+    def start_services():
+        # The installer stops the LoRa backend early on: at least start it again, so a failed
+        # update does not leave the gateway deaf.
+        subprocess.run(["/usr/bin/python3", os.path.abspath(__file__), "--init"], stdout=log, stderr=subprocess.STDOUT)
+
+    def roll_back():
+        if not os.path.isdir(SRC_DIR + ".old"):
+            say("There is no previous version to go back to; starting the gateway services again")
+            start_services()
+            return
+        say(f"Going back to {VERSION}")
+        _sh.rmtree(SRC_DIR, ignore_errors=True)
+        os.rename(SRC_DIR + ".old", SRC_DIR)
+        os.sync()
+        rc = install(SRC_DIR)
+        if rc != 0:
+            say(f"Reinstalling {VERSION} failed too (exit {rc}); starting the gateway services again")
+            start_services()
+            return
+        problem = health_problem(backends)
+        say(f"Back on {VERSION}." if problem is None else f"{VERSION} does not run properly either: {problem}")
+
     say(f"bobcat-gw update: {VERSION} -> {tag} ({time.strftime('%Y-%m-%d %H:%M:%S')})")
-    url = f"https://github.com/{GITHUB_REPO}/archive/refs/tags/{tag}.tar.gz"
+    # BOBCAT_GW_TARBALL (as for install.sh) installs another archive, e.g. file:///root/x.tar.gz
+    # for testing; the archive's files must sit in one top folder, like GitHub's.
+    url = os.environ.get("BOBCAT_GW_TARBALL") or f"https://github.com/{GITHUB_REPO}/archive/refs/tags/{tag}.tar.gz"
     work = tempfile.mkdtemp(prefix="bobcat-gw-update.", dir="/var/tmp")
     try:
         say(f"Downloading {url}")
@@ -1648,19 +1741,18 @@ def run_update(tag):
             os.rename(SRC_DIR, SRC_DIR + ".old")
         _sh.move(new, SRC_DIR)
         os.sync()
+        backends = running_backends()   # before the installer stops them
         say("Running the installer (settings and password are kept)")
-        args = ["bash", os.path.join(SRC_DIR, "install.sh")] + ([] if _sh.which("tailscale") else ["--no-tailscale"])
-        p = subprocess.run(args, stdout=log, stderr=subprocess.STDOUT,
-                           env=dict(os.environ, BGW_DETACHED="1", DEBIAN_FRONTEND="noninteractive"))
-        if p.returncode != 0:
-            # The installer stops the LoRa backend early on: put the previous source back and
-            # start the backend again, so a failed update does not leave the gateway deaf.
-            say(f"The installer failed (exit {p.returncode}); starting the gateway services again")
-            if os.path.isdir(SRC_DIR + ".old"):
-                _sh.rmtree(SRC_DIR, ignore_errors=True)
-                os.rename(SRC_DIR + ".old", SRC_DIR)
-            subprocess.run(["/usr/bin/python3", os.path.abspath(__file__), "--init"], stdout=log, stderr=subprocess.STDOUT)
-            raise RuntimeError("the installer failed; see above")
+        rc = install(SRC_DIR)
+        if rc != 0:
+            problem = f"the installer failed (exit {rc})"
+        else:
+            say("Checking that the new version runs")
+            problem = health_problem(backends)
+        if problem:
+            say(f"The new version does not work: {problem}")
+            roll_back()
+            raise RuntimeError(problem)
         _sh.rmtree(SRC_DIR + ".old", ignore_errors=True)
         say(f"Update to {tag} finished.")
         return 0

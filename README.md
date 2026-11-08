@@ -160,7 +160,7 @@ bobcat-gw-update --check   # just check
 bobcat-gw-update           # update to the newest release
 ```
 
-The update's log is `/var/log/bobcat-gw-update.log`. If the installer fails, the updater puts the previous source back in `/opt/bobcat-gw-src` and starts the LoRa services again, so the gateway carries on. An update doesn't add Tailscale if it isn't installed already.
+The update's log is `/var/log/bobcat-gw-update.log`. After installing, the updater checks that the new version works: the web UI must answer and the LoRa backend that was running before must come back and stay up. If the installer fails or that check does, it reinstalls the previous version from `/opt/bobcat-gw-src` and says so, so the gateway carries on. The check is done by the version you update from, so it protects updates from 0.1.5 onwards. An update doesn't add Tailscale if it isn't installed already.
 
 ## Gateway EUI
 
