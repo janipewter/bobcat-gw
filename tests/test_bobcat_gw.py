@@ -43,7 +43,6 @@ ST_NOISE = [
     "2026-11-08 14:16:39.128 [SYN:INFO] Mean MCU drift vs SX130X#0: -1.4ppm",
     "2026-11-08 14:48:10.738 [SYN:WARN] Repeated excessive clock drifts between MCU/SX130X#0 "
     "(3 retries): -15.0ppm (threshold 12.9ppm)",
-    "2026-11-08 15:46:02.946 [HAL:ERRO] [lgw_start:1105] no I2C temperature sensor (using fixed 25.0C) on port 0x39",
 ]
 
 
