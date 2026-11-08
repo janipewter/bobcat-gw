@@ -68,6 +68,11 @@ main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 .icon-btn { background: none; border: 0; padding: 2px; margin-left: 6px; color: var(--muted); cursor: pointer; vertical-align: -2px; border-radius: 4px; line-height: 0; }
 .icon-btn:hover, .icon-btn:focus-visible { color: var(--accent); }
 .icon-btn svg { width: 14px; height: 14px; }
+/* The EUI is always 16 hex digits: size the box to fit them (ch = one monospace digit). */
+.eui-row { display: flex; align-items: center; gap: 4px; }
+#eui { width: calc(16ch + 24px); font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--surface-2); cursor: default; }
+#eui-copy { padding: 6px; margin-left: 0; }
+#eui-copy svg { width: 16px; height: 16px; }
 .upd-pill { cursor: pointer; font: inherit; font-size: 12px; color: var(--accent); border-color: var(--accent); }
 .upd-pill:hover { background: var(--accent); color: var(--accent-ink); }
 .pill { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--border); }
@@ -329,7 +334,10 @@ body.login-mode { background:
         </div>
       </div>
       <label for="eui">Gateway EUI</label>
-      <input type="text" id="eui" class="w-s" readonly tabindex="-1" spellcheck="false" style="font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--surface-2);cursor:default">
+      <div class="eui-row">
+        <input type="text" id="eui" readonly tabindex="-1" spellcheck="false">
+        <button type="button" class="icon-btn" id="eui-copy" title="Copy the gateway EUI" aria-label="Copy the gateway EUI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button>
+      </div>
       <div class="hint" id="eui-hint"></div>
       <div class="row">
         <div class="w-s"><label for="loc-lat">Latitude</label><input type="text" id="loc-lat" class="w-s" inputmode="decimal" placeholder="e.g. 51.5072" autocomplete="off"></div>
@@ -596,6 +604,21 @@ function setMsg(el, text, kind) {
   el.textContent = text || "";
   el.className = !text ? "sub" : kind === "err" ? "msg err" : kind === "busy" ? "sub busy" : "sub";
 }
+$("eui-copy").addEventListener("click", async () => {
+  const input = $("eui"), eui = input.value;
+  if (!eui) return;
+  let ok = false;
+  // The clipboard API needs HTTPS (or localhost); the web UI is usually plain HTTP, so fall
+  // back to selecting the text and the older copy command.
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(eui); ok = true; } } catch (e) {}
+  if (!ok) {
+    input.focus(); input.select();
+    try { ok = document.execCommand("copy"); } catch (e) {}
+    input.setSelectionRange(0, 0); input.blur();
+  }
+  toast(ok ? `Copied ${eui}` : "Couldn't copy it: select the EUI and copy it by hand.", ok ? "" : "err");
+});
+
 function toast(text, kind) {
   const t = document.createElement("div");
   t.className = "toast" + (kind === "err" ? " err" : "");
@@ -1306,7 +1329,8 @@ function watchUpdate(tag) {
       }
       if (!s.running && (s.result === "failed" || Date.now() - t0 > 15000)) {
         finished = true; st.className = "msg err";
-        st.textContent = s.result === "failed" ? "The update failed: see the log above. Trying again usually helps; the full log is in /var/log/bobcat-gw-update.log."
+        st.textContent = s.result === "rolled_back" ? "The new version didn't work, so the gateway went back to the version it had. The log above says why; the full log is in /var/log/bobcat-gw-update.log."
+                       : s.result === "failed" ? "The update failed: see the log above. Trying again usually helps; the full log is in /var/log/bobcat-gw-update.log."
                                                : "The update stopped unexpectedly. The log is in /var/log/bobcat-gw-update.log.";
         return;
       }
