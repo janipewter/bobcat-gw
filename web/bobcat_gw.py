@@ -709,9 +709,10 @@ class Totals:
 
 # Harmless messages kept off the dashboard's warnings list, where they would crowd out the
 # ones that matter (they stay in the service logs): the HAL meeting a corrupted frame with
-# coding rate 0, and Basics Station's clock-drift estimate briefly leaving its adaptive
-# threshold, which it handles by measuring again.
-QUIET_MESSAGES = ("wrong coding rate (0)", "Repeated excessive clock drifts")
+# coding rate 0, Basics Station's clock-drift estimate briefly leaving its adaptive
+# threshold, which it handles by measuring again, and the G285's missing temperature sensor
+# (files/patch_hal_tempsensor.py; Basics Station still logs it at ERRO on every start).
+QUIET_MESSAGES = ("wrong coding rate (0)", "Repeated excessive clock drifts", "no I2C temperature sensor")
 
 
 def quiet(text):
