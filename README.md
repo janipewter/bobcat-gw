@@ -224,13 +224,21 @@ sudo tools/build-binaries.sh
 
 The script links against Debian 12's libc, so the binaries run on the gateway even if the build machine's libc is newer, and it refuses to finish if a binary needs a newer glibc than Debian 12 has. `prebuilt/aarch64/BUILDINFO` records the versions and checksums.
 
+### Tests
+
+Every push runs the **Checks** workflow (`.github/workflows/ci.yml`): `bash -n` and ShellCheck on the shell scripts, a syntax check of the Python and of the web page's JavaScript, and the tests in `tests/`. The tests run on any Linux machine, with no Bobcat and no root: they render the backend configs for every region, parse real Basics Station log lines, and start the web UI to check that it serves its page. Run them with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
 ### Making a release
 
 The updater offers the highest `vX.Y.Z` tag, so a release is:
 
 1. Run `tools/check-base-image.sh`. If [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) has a new G285 image, test it on a gateway, then update `image/BASE_IMAGE` and commit it.
-2. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), and commit.
-3. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin main vX.Y.Z`. Gateways see it within a day, or straight away with **Check now**.
+2. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), commit, push main, and wait for the **Checks** workflow to pass (`gh run watch`).
+3. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. Gateways see it within a day, or straight away with **Check now**.
 4. Build the image from the tag (`tools/build-image.sh`, in a fresh clone of the tag) and attach it with its `.sha256` to a GitHub release for the tag (a full release, not a pre-release). Every release gets an image.
 5. Publishing the release runs the `Etcher button` workflow, which points the **Flash with Etcher** button in [Ready-made image](#ready-made-image) at the new image and commits that to main. Pull before your next change.
 

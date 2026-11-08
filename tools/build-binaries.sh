@@ -76,7 +76,7 @@ install -m 755 "$WORK/sx1302_hal/packet_forwarder/lora_pkt_fwd" "$OUT/lora_pkt_f
 install -m 755 "$WORK/sx1302_hal/util_chip_id/chip_id" "$OUT/chip_id"
 
 echo "==> LoRa Basics Station $STATION_VERSION"
-rm -rf "$WORK/basicstation" "$WORK/home"
+rm -rf "${WORK:?}/basicstation" "${WORK:?}/home"
 mkdir -p "$WORK/home"
 git clone -q --depth 1 -b "$STATION_VERSION" "$STATION_REPO" "$WORK/basicstation"
 # Station looks for its cross toolchain in $HOME/toolchain-<platform>/bin/<ARCH>-gcc

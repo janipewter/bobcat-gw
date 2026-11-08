@@ -1,0 +1,41 @@
+# Checks on every push and pull request, so a broken release is caught before it is tagged:
+# gateways install whatever the newest vX.Y.Z tag holds when their owner clicks Update.
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell scripts (bash -n, ShellCheck)
+        run: |
+          mapfile -t SH < <(git ls-files '*.sh')
+          for f in "${SH[@]}"; do bash -n "$f"; done
+          shellcheck --version | sed -n 2p
+          shellcheck -S warning "${SH[@]}"
+
+      - name: Python syntax
+        run: git ls-files '*.py' | xargs python3 -m py_compile
+
+      - name: Web page JavaScript syntax
+        run: |
+          python3 - <<'EOF'
+          import re
+          page = open("web/static/index.html", encoding="utf-8").read()
+          scripts = re.findall(r"<script>(.*?)</script>", page, re.S)
+          assert scripts, "no <script> in index.html"
+          open("/tmp/page.js", "w", encoding="utf-8").write("\n".join(scripts))
+          EOF
+          node --check /tmp/page.js
+
+      - name: Tests (config, log parsing, update status, web UI startup)
+        run: python3 -m unittest discover -s tests -v
