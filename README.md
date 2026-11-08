@@ -17,7 +17,7 @@
 </p>
 
 > [!WARNING]
-> **This project is entirely vibes, and it's a beta.** The code, the installer and this README were written by an AI coding assistant, directed and tested by a human on a single Bobcat 300 G285. It has not been reviewed line by line, and it has not been tested on other boards or setups. It works on that one gateway; use it at your own risk, and read `install.sh` before running it as root.
+> **This project is ✨entirely vibes✨, and it's a beta.** The code, the installer and this README were written by an AI coding assistant, directed and tested by a human on a single Bobcat 300 G285. It has not been reviewed line by line, and it has not been tested on other boards or setups. It works on that one gateway; use it at your own risk, and read `install.sh` before running it as root.
 
 > [!NOTE]
 > bobcat-gw is inspired by **[AdvdLaar/Bobcat300-TTN](https://github.com/AdvdLaar/Bobcat300-TTN)**, which first turned the Bobcat 300 into a The Things Network gateway with the Semtech UDP packet forwarder. bobcat-gw uses its G285 concentrator reset sequence, can import its settings, and builds on its approach of running everything from the microSD card.
@@ -250,7 +250,7 @@ The **What's new** link on the System tab opens the tag's page, with or without 
 - [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian): Armbian for the Bobcat 300.
 - [metrafonic/Bobcat300-DebianMinimalDocker](https://github.com/metrafonic/Bobcat300-DebianMinimalDocker) and r00t1ng: earlier work on the concentrator reset.
 - [Basics Station](https://github.com/lorabasics/basicstation), Semtech [sx1302_hal](https://github.com/Lora-net/sx1302_hal), and the [ChirpStack MQTT Forwarder](https://github.com/chirpstack/chirpstack-mqtt-forwarder). Their licences are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- [Claude Code](https://claude.com/claude-code): wrote the code.
+- [Claude Opus](https://claude.com/claude-code): wrote the code.
 
 ## License
 
