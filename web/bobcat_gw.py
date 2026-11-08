@@ -31,7 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 
 APP_DIR = os.environ.get("BOBCAT_GW_APP", "/opt/bobcat-gw")
 CONF_DIR = os.environ.get("BOBCAT_GW_CONF", "/etc/bobcat-gw")
