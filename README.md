@@ -12,12 +12,11 @@
   <img alt="LoRaWAN: ChirpStack" src="https://img.shields.io/badge/LoRaWAN-ChirpStack-0d83d0?labelColor=555">
   <img alt="Backends: Basics Station, packet forwarder, MQTT" src="https://img.shields.io/badge/Backends-Basics%20Station%20%7C%20Packet%20Forwarder%20%7C%20MQTT-2ea44f?labelColor=555">
   <img alt="Remote access: Tailscale" src="https://img.shields.io/badge/Remote%20access-Tailscale-242424?logo=tailscale&logoColor=white&labelColor=555">
-  <img alt="Status: beta" src="https://img.shields.io/badge/Status-beta-yellow?labelColor=555">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow?labelColor=555"></a>
 </p>
 
 > [!WARNING]
-> **This project is ✨entirely vibes✨, and it's a beta.** The code, the installer and this README were written by an AI coding assistant, directed and tested by a human on a single Bobcat 300 G285. It has not been reviewed line by line, and it has not been tested on other boards or setups. It works on that one gateway; use it at your own risk, and read `install.sh` before running it as root.
+> **This project is ✨entirely vibes✨.** The code, the installer and this README were written by an AI coding assistant, directed and tested by a human on three Bobcat 300 G285 miners, where it runs without problems. It has not been reviewed line by line, and it has not been tested on other boards or setups. Use it at your own risk, and read `install.sh` before running it as root.
 
 > [!NOTE]
 > bobcat-gw is inspired by **[AdvdLaar/Bobcat300-TTN](https://github.com/AdvdLaar/Bobcat300-TTN)**, which first turned the Bobcat 300 into a The Things Network gateway with the Semtech UDP packet forwarder. bobcat-gw uses its G285 concentrator reset sequence, can import its settings, and builds on its approach of running everything from the microSD card.
@@ -236,7 +235,7 @@ python3 -m unittest discover -s tests -v
 
 The updater offers the highest `vX.Y.Z` tag, so a release is:
 
-1. Run `tools/check-base-image.sh`. If [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) has a new G285 image, test it on a gateway, then update `image/BASE_IMAGE` and commit it.
+1. Run `tools/check-upstream.sh`. Each release ships the newest upstream versions of the Bobcat-Armbian base image, sx1302_hal, Basics Station and the ChirpStack MQTT Forwarder (Tailscale is installed fresh from its stable repo on first boot). For anything newer it reports, bump the pin as it says, test it on a gateway and commit it. A new base image from [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) goes into `image/BASE_IMAGE`; a new sx1302_hal or Basics Station needs `prebuilt/aarch64/` rebuilt with `tools/build-binaries.sh`.
 2. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), commit, push main, and wait for the **Checks** workflow to pass (`gh run watch`).
 3. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. Gateways see it within a day, or straight away with **Check now**.
 4. Build the image from the tag (`tools/build-image.sh`, in a fresh clone of the tag) and attach it with its `.sha256` to a GitHub release for the tag (a full release, not a pre-release). Every release gets an image.
@@ -246,7 +245,7 @@ The **What's new** link on the System tab opens the tag's page, with or without 
 
 ## Limitations
 
-- Tested on one G285 only. The G280 (SX1301) isn't supported; the G29x uses a different SPI device and is untested.
+- Tested on three G285s. The G280 (SX1301) isn't supported; the G29x uses a different SPI device and is untested.
 - The packet forwarder channel plans cover EU868, US915, AU915, AS923-1 and KR920. With Basics Station the network server sends the channel plan.
 - Ethernet only (see [Why Ethernet only?](#why-ethernet-only)).
 - No GPS, so no Class B beacons and no fine timestamps.
