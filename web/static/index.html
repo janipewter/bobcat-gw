@@ -573,7 +573,6 @@ function tparts(ts) {
   const off = Math.round((Date.UTC(n("year"), n("month") - 1, n("day"), n("hour"), n("minute"), n("second")) - (ms - ms % 1000)) / 60000);
   return {y: p.year, mo: p.month, d: p.day, h: p.hour, mi: p.minute, s: p.second, mon: MONTHS[n("month") - 1], day: n("day"), hour: n("hour"), off};
 }
-const clock = (ts) => { const t = tparts(ts); return `${t.h}:${t.mi}:${t.s}`; };
 // "2026-10-10T12:29:49+01:00"
 function iso(ts) {
   const t = tparts(ts), a = Math.abs(t.off);
@@ -857,7 +856,7 @@ function renderDash(s) {
   renderPackets(s.packets);
   $("d-events-card").classList.toggle("hidden", !s.events.length);
   $("d-events").innerHTML = "<tr><th>Time</th><th>Service</th><th>Message</th></tr>" + s.events.map((e) =>
-    `<tr><td>${clock(e.ts)}</td><td>${esc(SVC_NAME[e.unit] || e.unit)}</td><td style="white-space:normal">${statusBadge(e.level === "error" ? "critical" : "warning", "")} ${esc(e.msg)}</td></tr>`).join("");
+    `<tr><td>${iso(e.ts)}</td><td>${esc(SVC_NAME[e.unit] || e.unit)}</td><td style="white-space:normal">${statusBadge(e.level === "error" ? "critical" : "warning", "")} ${esc(e.msg)}</td></tr>`).join("");
   loadNetSummary();
 }
 
