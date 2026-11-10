@@ -362,6 +362,66 @@ def auth_header(token):
     return f"Authorization: Bearer {token}\r\n"
 
 
+def tts_request(host, key, path, body=None):
+    """Call The Things Stack's HTTP API (GET, or PUT with a body). Raises urllib errors."""
+    req = urllib.request.Request(
+        f"https://{host}/api/v3{path}", method="GET" if body is None else "PUT",
+        data=None if body is None else json.dumps(body).encode(),
+        headers={"Authorization": f"Bearer {key}", "Accept": "application/json",
+                 "Content-Type": "application/json", "User-Agent": f"bobcat-gw/{VERSION}"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.load(r)
+
+
+def sync_tts_location(cfg):
+    """Basics Station can't report where the gateway is, so write the location to the gateway's
+    first antenna on The Things Stack (TTN) through its API, with the Basics Station API key.
+    That key needs the rights to view gateway information and edit basic gateway settings as
+    well as to link; a key without them is normal and only gets a note.
+    Returns None if there's nothing to do, else (result, message), result "ok", "no_permission"
+    (set the location in the console instead) or "error"."""
+    b, loc = cfg["basicstation"], cfg.get("location") or {}
+    host = urllib.parse.urlsplit(b.get("uri") or "").hostname
+    if (cfg.get("backend") != "basicstation" or b.get("auth") != "token" or not b.get("token")
+            or loc.get("lat") is None or not host):
+        return None
+    key = re.sub(r"(?i)^(authorization:\s*)?(bearer\s+)?", "", b["token"].strip())
+    no_permission = ("no_permission", "The location wasn't set on The Things Stack, as the API key isn't allowed "
+                     "to. Set it in the console, or give the key the rights View gateway information and "
+                     "Edit basic gateway settings.")
+    step = "auth_info"
+    try:
+        ak = tts_request(host, key, "/auth_info").get("api_key") or {}
+        gid = ((ak.get("entity_ids") or {}).get("gateway_ids") or {}).get("gateway_id")
+        rights = set((ak.get("api_key") or {}).get("rights") or [])
+        if not gid or not ("RIGHT_GATEWAY_ALL" in rights or
+                           {"RIGHT_GATEWAY_INFO", "RIGHT_GATEWAY_SETTINGS_BASIC"} <= rights):
+            return no_permission
+        step = "gateway"
+        antennas = tts_request(host, key, f"/gateways/{gid}?field_mask=antennas").get("antennas") or [{}]
+        want = {"latitude": loc["lat"], "longitude": loc["lon"], "altitude": int(loc.get("alt") or 0),
+                "source": "SOURCE_REGISTRY"}
+        have = antennas[0].get("location") or {}
+        if all((have.get(k) or 0) == want[k] for k in ("latitude", "longitude", "altitude")):
+            return "ok", f"The Things Stack already has this location for gateway {gid}."
+        antennas[0] = dict(antennas[0], location=want)
+        tts_request(host, key, f"/gateways/{gid}", {"gateway": {"ids": {"gateway_id": gid}, "antennas": antennas},
+                                                    "field_mask": {"paths": ["antennas"]}})
+        return "ok", f"Location set on The Things Stack for gateway {gid}."
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            return no_permission
+        if e.code == 401:
+            why = "it rejected the API key"
+        elif e.code == 404 and step == "auth_info":
+            why = f"{host} doesn't look like The Things Stack"
+        else:
+            why = f"HTTP {e.code}"
+        return "error", f"Couldn't set the location on The Things Stack: {why}."
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return "error", f"Couldn't reach The Things Stack at {host} to set the location ({getattr(e, 'reason', e)})."
+
+
 def render_station(cfg, hw):
     d = os.path.join(STATE_DIR, "station")
     # Start from a clean directory: station keeps CUPS/TC state files here.
@@ -2113,7 +2173,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         APP.store.save(new)
         apply_backend(new, APP.hw)
         APP._units_time = 0
-        self.send_json({"ok": True})
+        synced = sync_tts_location(new)
+        self.send_json({"ok": True, **({"location_sync": {"result": synced[0], "message": synced[1]}} if synced else {})})
 
     def change_password(self, body):
         forced = must_change()

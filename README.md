@@ -136,13 +136,13 @@ Open `http://<gateway-ip>/` (or `http://<hostname>.local/`) and sign in.
 
 | Method | In the TTN console | In bobcat-gw |
 |---|---|---|
-| Basics Station (LNS), recommended | Create an API key with *Link as Gateway to a Gateway Server for traffic exchange*. | URI `wss://eu1.cloud.thethings.network:8887`, auth *API key* |
+| Basics Station (LNS), recommended | Create an API key with *Link as Gateway to a Gateway Server for traffic exchange*, plus *View gateway information* and *Edit basic gateway settings* if bobcat-gw should set the gateway's location. | URI `wss://eu1.cloud.thethings.network:8887`, auth *API key* |
 | Basics Station (CUPS) | Create a CUPS API key with *View gateway information*, *Edit basic gateway settings* and *Retrieve secrets associated with a gateway*. Save the LNS API key in the gateway's settings too: TTN hands it to the gateway over CUPS. | URI `https://eu1.cloud.thethings.network:443`, auth *API key* |
 | Semtech UDP | Register the gateway EUI. | Server `eu1.cloud.thethings.network`, ports 1700 |
 
 Use the gateway EUI shown in the web UI, and the cluster (`eu1`, `nam1`, `au1`) you registered on. TTN doesn't accept gateways over MQTT; use MQTT with ChirpStack.
 
-**Location:** set the gateway's location in the TTN console. The location on bobcat-gw's LNS tab can't reach TTN: TTN only takes locations from status messages over authenticated connections, not from UDP gateways, and Basics Station has no way to send one. (With MQTT or UDP, the location does go into the status messages, which ChirpStack can use.) With Basics Station, the gateway reports its version to TTN as `bobcat-gw <version>`.
+**Location:** with Basics Station, saving the LNS tab with a location also sets it on the TTN gateway through TTN's API, using the gateway's API key. The key needs *Edit basic gateway settings* for that (and *View gateway information*); the save message says whether it worked. Without that right, set the location in the TTN console: TTN only takes locations from status messages over authenticated connections, not from UDP gateways, and Basics Station has no way to send one. (With MQTT or UDP, the location does go into the status messages, which ChirpStack can use.) With Basics Station, the gateway reports its version to TTN as `bobcat-gw <version>`.
 
 ### ChirpStack over MQTT
 

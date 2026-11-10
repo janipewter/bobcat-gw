@@ -153,6 +153,69 @@ class UpdateStatus(unittest.TestCase):
         self.assertIsNone(self.result("Starting the update to v9.9.9"))
 
 
+class TtsLocation(unittest.TestCase):
+    """Setting the gateway location on The Things Stack, with its API faked."""
+
+    def cfg(self, **kw):
+        c = json.loads(json.dumps(bg.DEFAULT_CONFIG))
+        c["backend"] = "basicstation"
+        c["basicstation"]["token"] = "Authorization: Bearer NNSXS.KEY"
+        c["location"] = {"lat": 50.392312, "lon": -4.164734, "alt": None}
+        c.update(kw)
+        return c
+
+    def run_sync(self, cfg, gateway, rights=("RIGHT_GATEWAY_INFO", "RIGHT_GATEWAY_LINK", "RIGHT_GATEWAY_SETTINGS_BASIC")):
+        calls = []
+
+        def fake(host, key, path, body=None):
+            calls.append((host, key, path, body))
+            if path == "/auth_info":
+                return {"api_key": {"entity_ids": {"gateway_ids": {"gateway_id": "gw1"}},
+                                    "api_key": {"rights": list(rights)}}}
+            if body is None:
+                return gateway
+            return {}
+        old, bg.tts_request = bg.tts_request, fake
+        try:
+            return bg.sync_tts_location(cfg), calls
+        finally:
+            bg.tts_request = old
+
+    def test_sets_location_keeping_antenna_gain(self):
+        (result, msg), calls = self.run_sync(self.cfg(), {"antennas": [{"gain": 3}]})
+        self.assertEqual(result, "ok", msg)
+        host, key, path, body = calls[-1]
+        self.assertEqual((host, key, path), ("eu1.cloud.thethings.network", "NNSXS.KEY", "/gateways/gw1"))
+        self.assertEqual(body["field_mask"], {"paths": ["antennas"]})
+        self.assertEqual(body["gateway"]["antennas"], [{"gain": 3, "location": {
+            "latitude": 50.392312, "longitude": -4.164734, "altitude": 0, "source": "SOURCE_REGISTRY"}}])
+
+    def test_unchanged_location_is_not_written(self):
+        have = {"antennas": [{"location": {"latitude": 50.392312, "longitude": -4.164734, "source": "SOURCE_REGISTRY"}}]}
+        (result, _), calls = self.run_sync(self.cfg(), have)
+        self.assertEqual(result, "ok")
+        self.assertTrue(all(c[3] is None for c in calls))
+
+    def test_key_without_settings_right(self):
+        (result, msg), calls = self.run_sync(self.cfg(), {}, rights=("RIGHT_GATEWAY_LINK",))
+        self.assertEqual(result, "no_permission")
+        self.assertIn("Set it in the console", msg)
+        self.assertEqual(len(calls), 1)
+
+    def test_forbidden_by_server(self):
+        def fake(host, key, path, body=None):
+            raise urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+        old, bg.tts_request = bg.tts_request, fake
+        try:
+            self.assertEqual(bg.sync_tts_location(self.cfg())[0], "no_permission")
+        finally:
+            bg.tts_request = old
+
+    def test_nothing_to_do(self):
+        self.assertIsNone(self.run_sync(self.cfg(backend="udp"), {})[0])
+        self.assertIsNone(self.run_sync(self.cfg(location={"lat": None, "lon": None, "alt": None}), {})[0])
+
+
 def free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
