@@ -128,6 +128,39 @@ class StationLog(unittest.TestCase):
         self.assertEqual(list(self.stats.events), [])
         self.assertEqual(len(self.stats.packets), 0)
 
+    def start(self, connect_after):
+        """A station start (real G285 lines) where DNS isn't ready yet, reaching MUXS
+        connect_after seconds after the start."""
+        t = 1762731599.0
+        lines = [
+            (0, "2026-11-09 23:39:59.248 [SYS:INFO] Station Ver : 2.0.6(corecell/std) 2026-10-09 22:40:52"),
+            (0, "2026-11-09 23:39:59.257 [SYS:WARN] Station in NO-CUPS mode"),
+            (0, "2026-11-09 23:39:59.730 [AIO:ERRO] [-1] WS connect failed: NET - Failed to get an IP address for the given hostname"),
+            (0, "2026-11-09 23:39:59.732 [TCE:ERRO] TC connect failed - URI: wss://eu1.cloud.thethings.network:8887"),
+            (10, "2026-11-09 23:40:11.120 [TCE:INFO] Infos: 16:c001:f150:1019 muxs-::0 wss://eu1.cloud.thethings.network:8887/traffic/eui-0016C001F1501019"),
+            (10, "2026-11-09 23:40:11.120 [AIO:ERRO] Recv failed: SSL - The peer notified us that the connection is going to be closed"),
+            (14, "2026-11-09 23:40:19.000 [HAL:ERRO] [lgw_start:1105] no I2C temperature sensor (using fixed 25.0C) on port 0x39"),
+            (connect_after, "2026-11-09 23:40:20.000 [TCE:INFO] Connected to MUXS."),
+        ]
+        for dt, line in lines:
+            self.stats.feed(station_entry(line, t + dt))
+
+    def test_routine_start_is_quiet(self):
+        self.start(connect_after=20)
+        self.assertEqual(list(self.stats.events), [])
+        self.assertEqual(self.stats.sources["station"].state, "connected")
+
+    def test_slow_start_keeps_connect_errors(self):
+        self.start(connect_after=bg.ST_START_GRACE + 60)
+        msgs = [e["msg"] for e in self.stats.events]
+        self.assertEqual(len(msgs), 2, msgs)
+        self.assertTrue(all(m.startswith(("[AIO] [-1]", "[TCE] TC connect")) for m in msgs), msgs)
+
+    def test_recv_failed_elsewhere_is_an_error(self):
+        self.stats.feed(station_entry("2026-11-09 23:50:00.000 [AIO:ERRO] Recv failed: SSL - The peer "
+                                      "notified us that the connection is going to be closed"))
+        self.assertEqual(len(self.stats.events), 1)
+
     def test_errors_are_events(self):
         self.stats.feed(station_entry("2026-11-08 15:00:00.000 [TCE:ERRO] Connection to MUXS failed"))
         self.assertEqual(len(self.stats.events), 1)

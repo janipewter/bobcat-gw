@@ -769,9 +769,18 @@ class Totals:
 
 # Harmless messages kept off the dashboard's warnings list, where they would crowd out the
 # ones that matter (they stay in the service logs): the HAL meeting a corrupted frame with
-# coding rate 0, and Basics Station's clock-drift estimate briefly leaving its adaptive
-# threshold, which it handles by measuring again.
-QUIET_MESSAGES = ("wrong coding rate (0)", "Repeated excessive clock drifts")
+# coding rate 0, Basics Station's clock-drift estimate briefly leaving its adaptive
+# threshold, which it handles by measuring again, and two lines Basics Station logs on every
+# start: NO-CUPS mode (bobcat-gw doesn't use CUPS) and the G285's missing temperature sensor
+# (files/patch_hal_tempsensor.py; the HAL still logs it at ERRO).
+QUIET_MESSAGES = ("wrong coding rate (0)", "Repeated excessive clock drifts",
+                  "Station in NO-CUPS mode", "no I2C temperature sensor")
+# Basics Station modules whose errors are about the connection to the LNS.
+ST_CONN_MODS = ("TCE", "AIO", "CUP", "WSC", "TLS")
+# Connection errors from a station start are dropped from the list if the station reaches
+# MUXS within this many seconds: right after boot, DNS can lag network-online.target by a
+# second or two, and Basics Station retries on its own.
+ST_START_GRACE = 120
 
 
 def quiet(text):
@@ -800,6 +809,8 @@ class Stats:
         self.counting_since = None
         self.totals = Totals(TOTALS_FILE)
         self._entry = (None, None)  # (boot ID, monotonic µs) of the journal entry being parsed
+        self._st_start = None  # when Basics Station last started, until it reaches MUXS
+        self._st_last = ""  # the previous Basics Station log message
 
     def _bucket(self, ts, idx):
         hour = int(ts // 3600 * 3600)
@@ -970,6 +981,7 @@ class Stats:
         if not m:
             return
         mod, level, text = m.groups()
+        last, self._st_last = self._st_last, text
         src = self.sources["station"]
         rx = self.ST_RX.match(text)
         if rx:
@@ -1007,9 +1019,19 @@ class Stats:
             if self._this_boot():
                 self.counters["tx_requested"] += 1
             return
+        if text.startswith("Station Ver"):
+            self._st_start = ts
         if "Connected to MUXS" in text:
             src.last_ok = ts
             src.set("connected", "", ts)
+            if self._st_start is not None and ts - self._st_start <= ST_START_GRACE:
+                start = self._st_start
+                kept = [e for e in self.events if not (
+                    e["unit"] == "station" and e["ts"] >= start
+                    and e["msg"].startswith(tuple(f"[{m}]" for m in ST_CONN_MODS)))]
+                self.events.clear()
+                self.events.extend(kept)
+            self._st_start = None
         elif "Connecting to MUXS" in text or "Connecting to INFOS" in text:
             src.set("connecting", text, ts)
         elif text.startswith("Configuring for region"):
@@ -1022,9 +1044,11 @@ class Stats:
             self.event(ts, "station", "error", text)
         elif quiet(text):
             pass
+        elif mod == "AIO" and text.startswith("Recv failed") and last.startswith("Infos:"):
+            pass  # the INFOS server closes the connection once it has sent the MUXS URI
         elif level in ("ERRO", "CRIT"):
             self.event(ts, "station", "error", f"[{mod}] {text}")
-            if mod in ("TCE", "AIO", "CUP", "WSC", "TLS"):
+            if mod in ST_CONN_MODS:
                 src.set("disconnected", text, ts)
         elif level == "WARN":
             self.event(ts, "station", "warning", f"[{mod}] {text}")
