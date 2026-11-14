@@ -197,13 +197,16 @@ body.login-mode { background:
   background: none; color: var(--text-2); font: inherit; cursor: pointer; }
 .hdr-logout:hover { color: var(--text); background: var(--surface-2); }
 .hdr-logout svg { width: 16px; height: 16px; }
+/* fitHeader(): when the header doesn't fit on one row (say with the update pill showing),
+   Sign out shrinks to its icon, then the EUI (also on the LNS tab) goes */
+.bar.tight .hdr-logout span, .bar.tighter .eui { display: none; }
 @media (max-width: 640px) { .hdr-logout span { display: none; } .hdr-logout { order: 2; margin-left: auto; } nav { order: 3; } }
 @media (max-width: 640px) { nav { margin-left: 0; width: 100%; } nav button { flex: 1; padding: 7px 6px; } .big { font-size: 24px; } }
 </style>
 </head>
 <body class="booting">
 <header>
-  <div class="bar">
+  <div class="bar" id="hdr-bar">
     <div class="brand">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
         <path d="M12 20v-8"/><circle cx="12" cy="10" r="2"/><path d="M8.5 13.5a5 5 0 0 1 0-7"/><path d="M15.5 6.5a5 5 0 0 1 0 7"/>
@@ -791,6 +794,7 @@ async function refresh() {
   const u = s.update || {};
   $("hdr-update").hidden = !u.available;
   if (u.available) $("hdr-update").textContent = `Update available: ${u.latest}`;
+  fitHeader();
   if (tab === "sys" && UPD && !!u.available !== !!UPD.available) loadUpdate(false);
   if (tab === "dash") renderDash(s);
   if (tab === "sys") renderServices(s);
@@ -949,6 +953,19 @@ $("chart-toggle").addEventListener("click", () => {
   if (!showTable && STATUS) renderChart(STATUS.hourly);
 });
 window.addEventListener("resize", () => STATUS && tab === "dash" && renderChart(STATUS.hourly));
+// Phones get their own two-row header (the 640px media queries); wider screens keep it on one
+// row by dropping the least needed parts, see .bar.tight.
+function fitHeader() {
+  const bar = $("hdr-bar"), first = bar.firstElementChild, last = $("hdr-logout");
+  bar.classList.remove("tight", "tighter");
+  if (window.innerWidth <= 640 || last.classList.contains("hidden")) return;
+  const wraps = () => last.offsetTop > first.offsetTop + first.offsetHeight / 2;
+  for (const c of ["tight", "tighter"]) {
+    if (!wraps()) return;
+    bar.classList.add(c);
+  }
+}
+window.addEventListener("resize", fitHeader);
 
 // ---- LNS configuration
 const TTN = (c) => ({basicstation: {lns: `wss://${c}.cloud.thethings.network:8887`, cups: `https://${c}.cloud.thethings.network:443`, auth: "token"},
