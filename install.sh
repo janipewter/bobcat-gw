@@ -292,6 +292,7 @@ chmod 755 /usr/local/sbin/bobcat-gw-update
 for u in "$SRC_DIR"/files/systemd/*.service; do
     install -m 644 "$u" /etc/systemd/system/
 done
+rm -f /var/tmp/station.pid   # stale pid file from before station's temp dir moved to /run
 mkdir -p "$STATE/station" "$STATE/pktfwd" "$STATE/mqtt"
 ln -sf "$APP/bin/reset_lgw.sh" "$STATE/pktfwd/reset_lgw.sh"
 systemctl daemon-reload

@@ -8,7 +8,11 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 WorkingDirectory=/var/lib/bobcat-gw/station
-ExecStart=/opt/bobcat-gw/bin/station --home /var/lib/bobcat-gw/station
+# Station keeps its pid file in its temp dir. On disk (/var/tmp) it survived reboots, and when
+# its old PID belonged to another process at the next boot, station refused to start for good.
+# /run is empty at every boot.
+RuntimeDirectory=bobcat-gw-station
+ExecStart=/opt/bobcat-gw/bin/station --home /var/lib/bobcat-gw/station --temp /run/bobcat-gw-station
 ExecStopPost=/opt/bobcat-gw/bin/reset_lgw.sh stop
 Restart=always
 RestartSec=10
