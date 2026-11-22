@@ -214,21 +214,41 @@ cases = {
     "ttls-mschap-no-check": {"ssid": "Corp", "security": "enterprise", "eap": "ttls", "phase2": "mschap",
         "identity": "u", "password": "p", "ca": "none"},
 }
+def nm(text):
+    return subprocess.run(["nmcli", "--offline", "connection", "modify", "connection.id", bg.WIFI_CON],
+                          input=text, capture_output=True, text=True)
+def keys(t):
+    sec, out = None, {}
+    for line in t.splitlines():
+        m = re.match(r"^\[(.+)\]$", line)
+        if m: sec = m.group(1)
+        elif "=" in line and sec:
+            k, v = line.split("=", 1)
+            out[sec + "." + k] = v
+    return out
+def understood_default(text, key, value):
+    # NetworkManager leaves out settings at their default value. A dropped true/false setting
+    # is fine if NetworkManager keeps it once flipped: then it knows it, and ours was the default.
+    if value not in ("true", "false"):
+        return False
+    sec, k = key.split(".", 1)
+    flipped, cur = [], None
+    for line in text.splitlines():
+        m = re.match(r"^\[(.+)\]$", line)
+        if m: cur = m.group(1)
+        if cur == sec and line.startswith(k + "="):
+            line = k + "=" + ("false" if value == "true" else "true")
+        flipped.append(line)
+    p = nm("\n".join(flipped) + "\n")
+    return p.returncode == 0 and key in keys(p.stdout)
 bad = 0
 for name, s in cases.items():
     text = bg.wifi_keyfile(bg.clean_wifi(s), "11111111-2222-3333-4444-555555555555")
-    p = subprocess.run(["nmcli", "--offline", "connection", "modify", "connection.id", bg.WIFI_CON],
-                       input=text, capture_output=True, text=True)
+    p = nm(text)
     if p.returncode:
         print(f"REJECTED {name}: {p.stderr.strip()}"); bad = 1; continue
-    def keys(t):
-        sec, out = None, set()
-        for line in t.splitlines():
-            m = re.match(r"^\[(.+)\]$", line)
-            if m: sec = m.group(1)
-            elif "=" in line and sec: out.add(sec + "." + line.split("=", 1)[0])
-        return out
-    lost = keys(text) - keys(p.stdout)
+    ours, back = keys(text), keys(p.stdout)
+    lost = sorted(k for k in ours if k not in back and not understood_default(text, k, ours[k]))
     if lost:
         print(f"NOT UNDERSTOOD {name}: {sorted(lost)}"); bad = 1
     else:
