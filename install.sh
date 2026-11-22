@@ -315,7 +315,15 @@ step "Onboard WiFi"
 # fixed device tree in place (files/dtb/rk3566-bobcat.dts); only then may the driver load.
 # Otherwise the driver stays blocked and the gateway is Ethernet-only.
 NO_WIFI=/etc/modprobe.d/bobcat-gw-no-wifi.conf
+NO_WIFI_NOW=/run/modprobe.d/bobcat-gw-no-wifi.conf
 if [ "$BOARD" = bobcat-285 ] && bash "$SRC_DIR/files/install-dtb.sh" /boot "$SRC_DIR/files/dtb/rk3566-bobcat.dtb"; then
+    # Until the next boot the board may still run the old device tree, on which the driver
+    # can hang it: keep the driver blocked for this boot only (/run is empty at every boot).
+    if ! grep -q -a 'bcm4329-fmac' /proc/device-tree/mmc@fe2c0000/wifi@1/compatible 2>/dev/null; then
+        mkdir -p /run/modprobe.d
+        printf 'blacklist brcmfmac\nblacklist brcmfmac_wcc\ninstall brcmfmac /bin/false\n' > "$NO_WIFI_NOW"
+        echo "WiFi turns on at the next reboot."
+    fi
     rm -f "$NO_WIFI"
 else
     echo "WiFi stays off (Ethernet only)."

@@ -1188,7 +1188,7 @@ function renderWifi(w) {
   WIFI = w;
   clearTimeout(wifiTimer);
   const st = w.state || "";
-  const [lvl, txt] = !w.present ? ["off", w.blocked ? "Switched off" : "No WiFi adapter found"]
+  const [lvl, txt] = !w.present ? (w.needs_reboot ? ["warning", "Turns on at the next reboot"] : ["off", w.blocked ? "Switched off" : "No WiFi adapter found"])
     : st === "connected" ? ["good", "Connected" + (w.ssid ? " to " + w.ssid : "")]
     : st.startsWith("connecting") ? ["warning", "Connecting…"]
     : st === "unavailable" ? ["off", "WiFi is off (radio disabled)"]
@@ -1201,8 +1201,10 @@ function renderWifi(w) {
   if (w.mac) rows.push(["MAC", w.mac]);
   $("wifi-info").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
   const others = $("wifi-others");
-  if (!w.present && w.blocked) {
-    others.textContent = "The WiFi driver is blocked because this gateway's device tree doesn't have the WiFi fix yet. Update bobcat-gw (or re-run install.sh), then reboot.";
+  if (!w.present && (w.blocked || w.needs_reboot)) {
+    others.textContent = w.needs_reboot
+      ? "The device tree with the WiFi fix is installed. Reboot the gateway (System tab) to turn the WiFi on."
+      : "The WiFi driver is blocked because this gateway's device tree doesn't have the WiFi fix yet. Update bobcat-gw (or re-run install.sh), then reboot.";
     others.classList.remove("hidden");
   } else if (w.others.length) {
     others.innerHTML = `<div>Also saved, set up outside the web UI: ${w.others.map((n) =>

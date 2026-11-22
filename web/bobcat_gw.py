@@ -1281,7 +1281,8 @@ WIFI_CON = "bobcat-gw-wifi"
 NM_CONN_DIR = os.environ.get("BOBCAT_GW_NM_DIR", "/etc/NetworkManager/system-connections")
 WIFI_KEYFILE = os.path.join(NM_CONN_DIR, WIFI_CON + ".nmconnection")
 WIFI_CA_PATH = os.path.join(CONF_DIR, "wifi", "ca.pem")
-WIFI_BLOCKED = "/etc/modprobe.d/bobcat-gw-no-wifi.conf"
+WIFI_BLOCKED = "/etc/modprobe.d/bobcat-gw-no-wifi.conf"          # no WiFi fix for this device tree
+WIFI_BLOCKED_NOW = "/run/modprobe.d/bobcat-gw-no-wifi.conf"      # fix installed, works after a reboot
 WIFI_SECURITY = ("psk", "sae", "enterprise", "open")
 WIFI_EAP = {"peap": ("mschapv2", "gtc", "md5"), "ttls": ("pap", "mschapv2", "mschap", "chap")}
 WIFI_CA_MODES = ("system", "custom", "none")
@@ -1519,6 +1520,7 @@ class Network:
         devs = self.devices() if devs is None else devs
         dev = next((d for d in devs if d["type"] == "wifi"), None)
         w = {"present": dev is not None, "blocked": os.path.exists(WIFI_BLOCKED),
+             "needs_reboot": not os.path.exists(WIFI_BLOCKED) and os.path.exists(WIFI_BLOCKED_NOW),
              "device": dev and dev["device"], "state": dev["state"] if dev else "",
              "connection": dev["connection"] if dev and dev["connection"] != "--" else "",
              "ipv4": dev["ipv4"] if dev else [], "mac": dev["mac"] if dev else "",
