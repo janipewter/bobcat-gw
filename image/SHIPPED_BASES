@@ -1,0 +1,10 @@
+# Every Bobcat-Armbian base image a bobcat-gw release has shipped on, oldest first.
+# Installed gateways keep their base forever (updates only rerun install.sh), so every new
+# release must pass tools/test-base-images.sh on all of these. Add a line when image/BASE_IMAGE
+# changes; never remove one.
+#
+# Upstream replaces its images in place, so each base is kept as a local copy (in
+# ../bobcat-armbian, found by checksum) and as the newest bobcat-gw release image built on it.
+#
+# base .img.xz sha256 | Armbian | upstream date | first release on it | fixture: release image built on it | its sha256
+a75f1ca460f982ad435aa7fd8d94cb24192a64bdf855fc5610a0eb9f82195270 26.02.0-trunk 2026-01-19 v0.1.2 https://github.com/janipewter/bobcat-gw/releases/download/v0.1.7/bobcat-gw-0.1.7-g285.img.xz c410e83b002b94d616ac7653ac5a91e8ed42b7c7399e23fb8eee51e9c087f54a
