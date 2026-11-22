@@ -31,7 +31,7 @@ import urllib.parse
 import urllib.request
 import uuid as uuidlib
 
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 
 APP_DIR = os.environ.get("BOBCAT_GW_APP", "/opt/bobcat-gw")
 CONF_DIR = os.environ.get("BOBCAT_GW_CONF", "/etc/bobcat-gw")
