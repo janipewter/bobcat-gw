@@ -30,8 +30,16 @@ if grep -q -a 'bcm4329-fmac' "$CUR"; then
     cmp -s "$CUR" "$NEW" && echo "WiFi device tree: installed" || echo "WiFi device tree: $DTB already has the fix"
     exit 0
 fi
-# Only replace the device tree this one is made from, not another board's.
+# Only replace the exact device tree the fix was made from and tested against. A different
+# one (another board's, or a newer Bobcat-Armbian image's without the fix) may need things this
+# older copy lacks, and swapping it could stop the board booting: leave it, WiFi stays off.
+# sha256 of dtb/rockchip/rk3566-bobcat.dtb in Bobcat-Armbian G285 2026-01-19 (image/BASE_IMAGE).
+KNOWN_ORIG="591156896a1668ce366a404a46b6ba63e5d3a6e0a695911cff42f33111b5df55"
 [ "$(basename "$DTB")" = "$(basename "$NEW")" ] || no "$DTB is not the G285 device tree this fix is for"
+case " $KNOWN_ORIG " in
+    *" $(sha256sum "$CUR" | cut -d' ' -f1) "*) ;;
+    *) no "$DTB is not the Bobcat-Armbian device tree this fix was tested with; leaving it alone" ;;
+esac
 
 mkdir -p "$BOOT/bobcat-gw"
 [ -f "$BOOT/bobcat-gw/$(basename "$DTB").orig" ] || cp "$CUR" "$BOOT/bobcat-gw/$(basename "$DTB").orig"
