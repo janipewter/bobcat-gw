@@ -97,7 +97,9 @@ if [ -z "${BGW_DETACHED:-}" ]; then
         done
     fi
     LOGFILE=/var/log/bobcat-gw-install.log
-    BGW_DETACHED=1 BGW_PW="$WEB_PASSWORD" setsid nohup "$0" "${ARGS[@]}" </dev/null >"$LOGFILE" 2>&1 &
+    # By path, with bash: "$0" alone fails when started as `bash install.sh` (no directory, so
+    # nohup searches PATH) or when the file has lost its executable bit.
+    BGW_DETACHED=1 BGW_PW="$WEB_PASSWORD" setsid nohup bash "$SRC_DIR/$(basename "$0")" "${ARGS[@]}" </dev/null >"$LOGFILE" 2>&1 &
     CHILD=$!
     echo "Installing in the background; it is safe if this connection drops."
     echo "Log file: $LOGFILE   (re-attach with: tail -f $LOGFILE)"
