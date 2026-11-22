@@ -441,7 +441,52 @@ body.login-mode { background:
   <section id="net">
     <div class="stack">
       <div class="card"><h2>Interfaces</h2><div class="tablewrap"><table id="n-devs"></table></div>
-        <p class="sub" style="margin-bottom:0">This gateway is Ethernet only. The Bobcat's built-in WiFi is switched off: its driver can lock up the board, especially while it starts.</p></div>
+        <p class="sub" style="margin-bottom:0">With Ethernet and WiFi both connected, the gateway sends its traffic over Ethernet and switches to WiFi if Ethernet goes down.</p></div>
+      <form class="card" id="wifi-card" autocomplete="off">
+        <h2>WiFi</h2>
+        <div id="wifi-status" style="margin-bottom:10px"></div>
+        <dl class="kv" id="wifi-info"></dl>
+        <div id="wifi-others" class="msg hidden" style="margin-top:10px"></div>
+        <div id="wifi-form">
+          <div class="row">
+            <div class="w-m"><label for="wifi-ssid">Network name (SSID)</label><input type="text" id="wifi-ssid" list="wifi-ssids" spellcheck="false" autocapitalize="none" maxlength="32"><datalist id="wifi-ssids"></datalist><div class="hint">Scan and pick a network, or type its name.</div></div>
+            <div class="w-m"><label for="wifi-sec">Security</label><select id="wifi-sec">
+              <option value="psk">WPA2/WPA3 Personal (password)</option><option value="sae">WPA3 Personal only</option>
+              <option value="enterprise">WPA2/WPA3 Enterprise (802.1X)</option><option value="open">Open (no password)</option></select></div>
+          </div>
+          <label class="choice" style="display:inline-block;margin-top:10px"><input type="checkbox" id="wifi-hidden"> <b>Hidden network</b> <span>The network doesn't broadcast its name.</span></label>
+          <div class="row" id="wifi-psk-wrap">
+            <div class="w-m"><label for="wifi-pw">Password</label><input type="password" id="wifi-pw" autocomplete="new-password"></div>
+          </div>
+          <div id="wifi-ent-wrap">
+            <div class="row">
+              <div class="w-s"><label for="wifi-eap">EAP method</label><select id="wifi-eap"><option value="peap">PEAP</option><option value="ttls">TTLS</option></select></div>
+              <div class="w-s"><label for="wifi-phase2">Inner authentication</label><select id="wifi-phase2"></select></div>
+            </div>
+            <div class="row">
+              <div class="w-m"><label for="wifi-id">Username</label><input type="text" id="wifi-id" spellcheck="false" autocapitalize="none"></div>
+              <div class="w-m"><label for="wifi-epw">Password</label><input type="password" id="wifi-epw" autocomplete="new-password"></div>
+              <div class="w-m"><label for="wifi-anon">Anonymous identity (optional)</label><input type="text" id="wifi-anon" spellcheck="false" autocapitalize="none" placeholder="e.g. anonymous@example.org"><div class="hint">Sent before the encrypted tunnel is up, instead of your username.</div></div>
+            </div>
+            <div class="row">
+              <div class="w-m"><label for="wifi-ca">Server certificate</label><select id="wifi-ca">
+                <option value="system">Check against public CAs</option><option value="custom">Check against my CA certificate</option><option value="none">Don't check (insecure)</option></select></div>
+              <div class="w-m"><label for="wifi-domain">Server domain (optional)</label><input type="text" id="wifi-domain" spellcheck="false" autocapitalize="none" placeholder="radius.example.org"><div class="hint">The server's certificate must be for this domain or a subdomain of it.</div></div>
+            </div>
+            <div id="wifi-ca-wrap">
+              <label for="wifi-ca-pem">CA certificate (PEM)</label><textarea id="wifi-ca-pem" class="w-xl" spellcheck="false"></textarea><button type="button" class="linkbtn file-load" data-target="wifi-ca-pem" data-kind="pem" data-accept=".pem,.crt,.cer,.txt">Upload a file…</button>
+            </div>
+            <div class="hint" id="wifi-ca-hint"></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn" type="button" id="wifi-scan">Scan</button>
+          <button class="btn primary" type="submit" id="wifi-save">Save and connect</button>
+          <button class="btn danger" type="button" id="wifi-forget">Forget</button>
+          <span class="sub" id="wifi-msg"></span>
+        </div>
+        <div class="tablewrap hidden" id="wifi-scan-wrap" style="margin-top:12px"><table id="wifi-scan-list"></table></div>
+      </form>
       <div class="card" id="ts-card">
         <h2>Tailscale</h2>
         <p class="sub" style="margin-top:0">Reach this gateway, including this web UI, from anywhere over your private Tailscale network, without opening any ports.</p>
@@ -1097,8 +1142,135 @@ async function loadNetwork() {
     const n = await api("/api/network");
     $("n-devs").innerHTML = "<tr><th>Interface</th><th>Type</th><th>State</th><th>Connection</th><th>IPv4</th><th>MAC</th></tr>" +
       n.devices.map((d) => `<tr><td>${esc(d.device)}</td><td>${esc(d.type)}</td><td>${esc(d.state)}</td><td>${esc(d.connection)}</td><td>${esc(d.ipv4.join(", "))}</td><td>${esc(d.mac)}</td></tr>`).join("");
+    renderWifi(n.wifi);
   } catch (e) {}
 }
+// ---- WiFi
+const WIFI_CON = "bobcat-gw-wifi";
+const WIFI_P2 = {peap: [["mschapv2", "MSCHAPv2"], ["gtc", "GTC"], ["md5", "MD5"]],
+  ttls: [["pap", "PAP"], ["mschapv2", "MSCHAPv2"], ["mschap", "MSCHAP"], ["chap", "CHAP"]]};
+const WIFI_SEC = {psk: "WPA2/WPA3 Personal", sae: "WPA3 Personal", enterprise: "Enterprise (802.1X)", open: "Open"};
+let WIFI = null, wifiFormLoaded = false, wifiTimer = null;
+const band = (f) => { const m = parseInt(f, 10); return !m ? "" : m < 3000 ? "2.4 GHz" : m < 5900 ? "5 GHz" : "6 GHz"; };
+function wifiFields() {
+  const sec = $("wifi-sec").value, eap = $("wifi-eap").value, ca = $("wifi-ca").value;
+  $("wifi-psk-wrap").classList.toggle("hidden", sec !== "psk" && sec !== "sae");
+  $("wifi-ent-wrap").classList.toggle("hidden", sec !== "enterprise");
+  const p2 = $("wifi-phase2"), cur = p2.value;
+  if (p2.dataset.eap !== eap) {
+    p2.innerHTML = WIFI_P2[eap].map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
+    p2.dataset.eap = eap;
+    if (WIFI_P2[eap].some(([v]) => v === cur)) p2.value = cur;
+  }
+  $("wifi-ca-wrap").classList.toggle("hidden", ca !== "custom");
+  $("wifi-ca-hint").textContent = ca === "none" ? "Without a check, a look-alike network could capture the password."
+    : ca === "custom" ? "Your organisation's RADIUS CA certificate. Ask your IT team, or export it from a device that already connects."
+    : "For RADIUS servers with a certificate from a public CA. Also set the server domain, or any public certificate would do.";
+}
+["wifi-sec", "wifi-eap", "wifi-ca"].forEach((id) => $(id).addEventListener("change", wifiFields));
+function wifiFill(p) {
+  p = p || {};
+  const personal = p.security === "psk" || p.security === "sae", ent = p.security === "enterprise";
+  $("wifi-ssid").value = p.ssid || ""; $("wifi-hidden").checked = !!p.hidden;
+  $("wifi-sec").value = p.security || "psk";
+  $("wifi-pw").value = personal && p.has_password ? MASK : "";
+  $("wifi-eap").value = p.eap || "peap";
+  wifiFields();
+  if (p.phase2) $("wifi-phase2").value = p.phase2;
+  $("wifi-id").value = p.identity || ""; $("wifi-epw").value = ent && p.has_password ? MASK : "";
+  $("wifi-anon").value = p.anonymous_identity || ""; $("wifi-domain").value = p.domain || "";
+  $("wifi-ca").value = p.ca || "system"; $("wifi-ca-pem").value = "";
+  $("wifi-ca-pem").placeholder = p.has_ca_cert ? "Leave empty to keep the stored certificate" : "-----BEGIN CERTIFICATE-----";
+  wifiFields();
+}
+function renderWifi(w) {
+  if (!w) return;
+  WIFI = w;
+  clearTimeout(wifiTimer);
+  const st = w.state || "";
+  const [lvl, txt] = !w.present ? ["off", w.blocked ? "Switched off" : "No WiFi adapter found"]
+    : st === "connected" ? ["good", "Connected" + (w.ssid ? " to " + w.ssid : "")]
+    : st.startsWith("connecting") ? ["warning", "Connecting…"]
+    : st === "unavailable" ? ["off", "WiFi is off (radio disabled)"]
+    : ["off", w.profile ? `Not connected${w.profile.ssid ? " (" + w.profile.ssid + ")" : ""}` : "Not set up"];
+  $("wifi-status").innerHTML = statusBadge(lvl, txt);
+  const rows = [];
+  if (w.connection && w.connection !== WIFI_CON) rows.push(["Profile", w.connection + " (set up outside the web UI)"]);
+  if (w.ipv4.length) rows.push(["IPv4", w.ipv4.join(", ")]);
+  if (w.signal != null) rows.push(["Signal", `${w.signal}%${band(w.freq) ? " · " + band(w.freq) : ""}`]);
+  if (w.mac) rows.push(["MAC", w.mac]);
+  $("wifi-info").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  const others = $("wifi-others");
+  if (!w.present && w.blocked) {
+    others.textContent = "The WiFi driver is blocked because this gateway's device tree doesn't have the WiFi fix yet. Update bobcat-gw (or re-run install.sh), then reboot.";
+    others.classList.remove("hidden");
+  } else if (w.others.length) {
+    others.innerHTML = `<div>Also saved, set up outside the web UI: ${w.others.map((n) =>
+      `<b>${esc(n)}</b> <button type="button" class="linkbtn" data-forget="${esc(n)}">Forget</button>`).join(" · ")}</div>`;
+    others.classList.remove("hidden");
+  } else others.classList.add("hidden");
+  $("wifi-form").classList.toggle("hidden", !w.present);
+  ["wifi-scan", "wifi-save"].forEach((id) => ($(id).disabled = !w.present));
+  $("wifi-forget").disabled = !w.profile;
+  if (!wifiFormLoaded) { wifiFill(w.profile); wifiFormLoaded = true; }
+  if (tab === "net" && st.startsWith("connecting")) wifiTimer = setTimeout(loadNetwork, 3000);
+}
+async function wifiForget(name) {
+  const ours = name === WIFI_CON;
+  if (!await confirmDialog({title: `Forget ${ours ? "this WiFi network" : name}?`, ok: "Forget", danger: true,
+    text: "The gateway disconnects from it and won't connect again by itself."})) return;
+  setMsg($("wifi-msg"), "Working…", "busy");
+  try {
+    const r = await api("/api/action", {action: "wifi_forget", name});
+    setMsg($("wifi-msg"), r.message, "ok");
+    if (ours) wifiFill(null);
+    renderWifi(r.wifi);
+  } catch (err) { setMsg($("wifi-msg"), err.message, "err"); }
+  loadNetwork();
+}
+$("wifi-others").addEventListener("click", (e) => { const b = e.target.closest("[data-forget]"); if (b) wifiForget(b.dataset.forget); });
+$("wifi-forget").addEventListener("click", () => wifiForget(WIFI_CON));
+$("wifi-scan").addEventListener("click", async () => {
+  setMsg($("wifi-msg"), "Scanning…", "busy");
+  try {
+    const r = await api("/api/action", {action: "wifi_scan"}), nets = r.networks;
+    $("wifi-ssids").innerHTML = nets.map((n) => `<option value="${esc(n.ssid)}">`).join("");
+    $("wifi-scan-list").innerHTML = "<tr><th>Network</th><th>Signal</th><th>Band</th><th>Security</th><th></th></tr>" +
+      nets.map((n, i) => `<tr><td>${esc(n.ssid)}</td><td>${n.signal}%</td><td>${esc(band(n.freq))}</td><td>${esc(WIFI_SEC[n.security])}</td>` +
+        `<td><button type="button" class="linkbtn" data-net="${i}">Use</button></td></tr>`).join("");
+    $("wifi-scan-list").onclick = (e) => {
+      const b = e.target.closest("[data-net]");
+      if (!b) return;
+      const n = nets[Number(b.dataset.net)];
+      $("wifi-ssid").value = n.ssid; $("wifi-hidden").checked = false; $("wifi-sec").value = n.security;
+      $("wifi-pw").value = $("wifi-epw").value = "";
+      wifiFields();
+      (n.security === "enterprise" ? $("wifi-id") : n.security === "open" ? $("wifi-save") : $("wifi-pw")).focus();
+    };
+    $("wifi-scan-wrap").classList.remove("hidden");
+    setMsg($("wifi-msg"), nets.length ? `Found ${nets.length} network${nets.length === 1 ? "" : "s"}. Hidden networks aren't listed.` : "No networks found.", "ok");
+  } catch (err) { setMsg($("wifi-msg"), err.message, "err"); }
+});
+$("wifi-card").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const sec = $("wifi-sec").value;
+  const wifi = {ssid: $("wifi-ssid").value, hidden: $("wifi-hidden").checked, security: sec};
+  if (sec === "psk" || sec === "sae") wifi.password = $("wifi-pw").value;
+  if (sec === "enterprise") Object.assign(wifi, {eap: $("wifi-eap").value, phase2: $("wifi-phase2").value,
+    identity: $("wifi-id").value.trim(), password: $("wifi-epw").value, anonymous_identity: $("wifi-anon").value.trim(),
+    domain: $("wifi-domain").value.trim(), ca: $("wifi-ca").value, ca_cert: $("wifi-ca-pem").value.trim()});
+  // Changing the WiFi this page is reached over can cut it off
+  if (WIFI && WIFI.ipv4.includes(location.hostname) && !await confirmDialog({title: "Change the WiFi you're connected over?",
+    ok: "Save and connect", text: "This page reaches the gateway over its WiFi. If the new settings don't work, you'll need Ethernet (or Tailscale) to get back in."})) return;
+  setMsg($("wifi-msg"), "Connecting… (this can take up to a minute)", "busy");
+  try {
+    const r = await api("/api/action", {action: "wifi_connect", wifi});
+    setMsg($("wifi-msg"), r.message, "ok");
+    wifiFill(r.wifi.profile);
+    renderWifi(r.wifi);
+  } catch (err) { setMsg($("wifi-msg"), err.message, "err"); }
+  loadNetwork();
+});
 // ---- tailscale
 let tsTimer = null, tsFormLoaded = false;
 const TS_STATE = {

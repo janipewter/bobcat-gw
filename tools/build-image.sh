@@ -9,7 +9,8 @@
 #
 # Done here, so that the very first boot is already safe and quiet:
 #   - bobcat-gw's source in /opt/bobcat-gw-src and the ChirpStack MQTT Forwarder binary
-#   - the WiFi driver blocked (it can hang the board while it starts; see README)
+#   - the device tree with working WiFi (files/dtb/); the WiFi driver stays blocked if it
+#     can't be installed (on the old device tree it can hang the board; see README)
 #   - the journal in RAM and Armbian's ramlog on (SD card wear)
 #   - Armbian's first-login wizard and console autologin removed, root's password locked
 #     (the first boot sets the default password bobcat for the web UI and root; the web
@@ -89,13 +90,18 @@ install -D -m 755 "$WORK/mqf/usr/bin/chirpstack-mqtt-forwarder" "$R/opt/bobcat-g
 
 step "Making the first boot safe and SD-card friendly"
 # Keep these in step with install.sh, which applies the same settings on normal installs.
-cat > "$R/etc/modprobe.d/bobcat-gw-no-wifi.conf" <<'EOF'
-# bobcat-gw: the onboard BCM43430 WiFi can hang the Bobcat when its driver starts.
-# The gateway is Ethernet-only. Remove this file at your own risk.
+if bash "$REPO/files/install-dtb.sh" "$R/boot" "$REPO/files/dtb/rk3566-bobcat.dtb"; then
+    rm -f "$R/etc/modprobe.d/bobcat-gw-no-wifi.conf"
+else
+    echo "WARNING: WiFi stays off in this image (Ethernet only)." >&2
+    cat > "$R/etc/modprobe.d/bobcat-gw-no-wifi.conf" <<'EOF'
+# bobcat-gw: the onboard BCM43430 WiFi can hang the Bobcat when its driver starts,
+# unless the board boots the fixed device tree (see bobcat-gw's files/dtb/).
 blacklist brcmfmac
 blacklist brcmfmac_wcc
 install brcmfmac /bin/false
 EOF
+fi
 mkdir -p "$R/etc/systemd/journald.conf.d"
 cat > "$R/etc/systemd/journald.conf.d/bobcat-gw.conf" <<'EOF'
 # bobcat-gw: keep the journal in RAM to spare the SD card. Logs don't survive a reboot.
@@ -117,15 +123,31 @@ cat > "$R/boot/bobcat-gw/README.txt" <<'EOF'
 bobcat-gw ready-made image
 ==========================
 
-On first boot the gateway sets itself up (a few minutes; it needs Ethernet, and the
+On first boot the gateway sets itself up (a few minutes; it needs a network, and the
 internet for the optional parts). Then open http://bobcat-285.local/ or http://<its IP>/
 and sign in with the default password bobcat. You'll be asked to change it; the new
 password is also root's password.
+
+Network: plug in Ethernet, or fill in wifi.txt in this folder before the first boot
+(open or WPA2/WPA3 Personal networks; enterprise WiFi is set up in the web UI). The
+first boot deletes wifi.txt once it has saved the network.
 
 SSH is off until you enable it on the web UI's System tab. To have it on from the first
 boot instead, put your public key(s) in a file called authorized_keys in this folder
 before the first boot (password login for root then stays off until you change it).
 EOF
+if [ ! -f "$R/etc/modprobe.d/bobcat-gw-no-wifi.conf" ]; then
+    cat > "$R/boot/bobcat-gw/wifi.txt" <<'EOF'
+# bobcat-gw: WiFi for the first boot (optional; Ethernet works without this file).
+# Fill in the network name and password after "=" (no quotes). Leave PASSWORD empty for an
+# open network, and set HIDDEN=yes if the network doesn't broadcast its name.
+# Enterprise (802.1X) WiFi can't be set up here: use the web UI's Network tab.
+# The first boot deletes this file once it has saved the network.
+SSID=
+PASSWORD=
+HIDDEN=no
+EOF
+fi
 
 step "Enabling the first-boot service"
 install -m 644 "$REPO/image/bobcat-gw-firstboot.service" "$R/etc/systemd/system/bobcat-gw-firstboot.service"

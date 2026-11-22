@@ -23,6 +23,22 @@ if [ -s /boot/bobcat-gw/authorized_keys ]; then
     echo "Added SSH keys from /boot/bobcat-gw/authorized_keys"
 fi
 
+# Optional: a WiFi network put on the boot partition as bobcat-gw/wifi.txt (SSID=, PASSWORD=,
+# HIDDEN=). Read as data, not sourced. It holds a password on a FAT partition anyone with the
+# card can read, so it is deleted once the network is saved.
+WIFI_TXT=/boot/bobcat-gw/wifi.txt
+if [ -f "$WIFI_TXT" ]; then
+    val() { sed -n "s/^[[:space:]]*$1[[:space:]]*=//p" "$WIFI_TXT" | tr -d '\r' | head -n1; }
+    ssid=$(val SSID); pw=$(val PASSWORD); hidden=$(val HIDDEN)
+    if [ -n "$ssid" ]; then
+        BGW_WIFI_SSID="$ssid" BGW_WIFI_PASSWORD="$pw" BGW_WIFI_HIDDEN="$hidden" \
+            python3 /opt/bobcat-gw-src/web/bobcat_gw.py --wifi-setup || echo "WiFi from $WIFI_TXT was not saved"
+    fi
+    rm -f "$WIFI_TXT"
+    sync
+    unset ssid pw hidden
+fi
+
 # Give the network up to 2 minutes; the installer works without it, just with less.
 for _ in $(seq 1 60); do
     getent hosts deb.debian.org >/dev/null 2>&1 && break

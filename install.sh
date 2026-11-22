@@ -1,11 +1,12 @@
 #!/bin/bash
 # bobcat-gw installer: turns a Bobcat 300 G285 running Armbian into a LoRaWAN
 # gateway with a web UI. Supports LoRa Basics Station, the Semtech UDP packet forwarder and MQTT
-# (ChirpStack MQTT Forwarder). Ethernet only: the onboard WiFi is disabled.
+# (ChirpStack MQTT Forwarder). Ethernet and/or the onboard WiFi (set up in the web UI).
 #
 # Inspired by https://github.com/AdvdLaar/Bobcat300-TTN
 #
 # Usage: sudo ./install.sh [--password <password> | --default-password] [--rebuild] [--build-on-device] [--force] [--no-tailscale]
+#                          [--wifi-ssid <name> [--wifi-hidden]]   (WiFi password: asked for, or from $WIFI_PASSWORD)
 #    or: curl -fsSL https://raw.githubusercontent.com/janipewter/bobcat-gw/main/install.sh | sudo bash -s -- [options]
 set -euo pipefail
 
@@ -30,6 +31,9 @@ REBUILD=0
 BUILD_ON_DEVICE=0
 FORCE=0
 TAILSCALE=1
+WIFI_SSID=""          # --wifi-ssid: save this WiFi network (open or WPA Personal)
+WIFI_HIDDEN=0
+WIFI_PASSWORD="${WIFI_PASSWORD:-}"   # from the environment or asked for, never an option (ps)
 
 ARGS=("$@")   # kept for re-running the installer: the loop below consumes "$@"
 while [ $# -gt 0 ]; do
@@ -40,7 +44,9 @@ while [ $# -gt 0 ]; do
         --build-on-device) BUILD_ON_DEVICE=1; shift ;;
         --force)    FORCE=1; shift ;;
         --no-tailscale) TAILSCALE=0; shift ;;
-        -h|--help)  sed -n '2,10p' "$0"; exit 0 ;;
+        --wifi-ssid) WIFI_SSID="${2:?--wifi-ssid needs a network name}"; shift 2 ;;
+        --wifi-hidden) WIFI_HIDDEN=1; shift ;;
+        -h|--help)  sed -n '2,11p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -81,7 +87,8 @@ echo "=========================================="
 
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo $0)"
 [ "$(uname -m)" = "aarch64" ] || die "expected an arm64 (aarch64) system"
-for f in web/bobcat_gw.py web/static/index.html files/reset_lgw.sh files/patch_hal_tempsensor.py; do
+for f in web/bobcat_gw.py web/static/index.html files/reset_lgw.sh files/patch_hal_tempsensor.py \
+         files/install-dtb.sh files/dtb/rk3566-bobcat.dtb; do
     [ -f "$SRC_DIR/$f" ] || die "missing $f; run install.sh from the bobcat-gw directory"
 done
 
@@ -96,8 +103,11 @@ if [ -z "${BGW_DETACHED:-}" ]; then
             echo "Too short."
         done
     fi
+    if [ -n "$WIFI_SSID" ] && [ -z "$WIFI_PASSWORD" ] && [ -t 0 ]; then
+        read -r -s -p "WiFi password for $WIFI_SSID (empty for an open network): " WIFI_PASSWORD; echo
+    fi
     LOGFILE=/var/log/bobcat-gw-install.log
-    BGW_DETACHED=1 BGW_PW="$WEB_PASSWORD" setsid nohup "$0" "${ARGS[@]}" </dev/null >"$LOGFILE" 2>&1 &
+    BGW_DETACHED=1 BGW_PW="$WEB_PASSWORD" WIFI_PASSWORD="$WIFI_PASSWORD" setsid nohup "$0" "${ARGS[@]}" </dev/null >"$LOGFILE" 2>&1 &
     CHILD=$!
     echo "Installing in the background; it is safe if this connection drops."
     echo "Log file: $LOGFILE   (re-attach with: tail -f $LOGFILE)"
@@ -298,29 +308,44 @@ ln -sf "$APP/bin/reset_lgw.sh" "$STATE/pktfwd/reset_lgw.sh"
 systemctl daemon-reload
 
 # ------------------------------------------------------------------
-step "Disabling the onboard WiFi"
-# The BCM43430 WiFi (brcmfmac, SDIO) jams its SDIO bus if the SD card is busy while the
-# driver starts the chip, which is nearly always the case at boot. The board then looks
-# dead (no network, no SSH) and only a power cycle recovers it; this is also what made
-# warm reboots "hang". So the gateway is Ethernet-only and the driver is never loaded.
-cat > /etc/modprobe.d/bobcat-gw-no-wifi.conf <<'EOF'
-# bobcat-gw: the onboard BCM43430 WiFi can hang the Bobcat when its driver starts.
-# The gateway is Ethernet-only. Remove this file at your own risk.
+step "Onboard WiFi"
+# The BCM43430 WiFi (brcmfmac, SDIO) needs a fixed device tree. On the one Bobcat-Armbian
+# ships, the driver can jam its SDIO bus while it starts with the SD card busy (nearly
+# always the case at boot), and the board hangs until power cycled. install-dtb.sh puts the
+# fixed device tree in place (files/dtb/rk3566-bobcat.dts); only then may the driver load.
+# Otherwise the driver stays blocked and the gateway is Ethernet-only.
+NO_WIFI=/etc/modprobe.d/bobcat-gw-no-wifi.conf
+if [ "$BOARD" = bobcat-285 ] && bash "$SRC_DIR/files/install-dtb.sh" /boot "$SRC_DIR/files/dtb/rk3566-bobcat.dtb"; then
+    rm -f "$NO_WIFI"
+else
+    echo "WiFi stays off (Ethernet only)."
+    cat > "$NO_WIFI" <<'EOF'
+# bobcat-gw: the onboard BCM43430 WiFi can hang the Bobcat when its driver starts,
+# unless the board boots the fixed device tree (see bobcat-gw's files/dtb/).
 blacklist brcmfmac
 blacklist brcmfmac_wcc
 install brcmfmac /bin/false
 EOF
-if command -v lsinitramfs >/dev/null 2>&1 && lsinitramfs "/boot/initrd.img-$(uname -r)" 2>/dev/null | grep -q brcmfmac; then
-    update-initramfs -u >/dev/null 2>&1 || echo "Warning: could not update the initramfs; WiFi may still load at boot"
+    if command -v lsinitramfs >/dev/null 2>&1 && lsinitramfs "/boot/initrd.img-$(uname -r)" 2>/dev/null | grep -q brcmfmac; then
+        update-initramfs -u >/dev/null 2>&1 || echo "Warning: could not update the initramfs; WiFi may still load at boot"
+    fi
 fi
-if lsmod | grep -q '^brcmfmac'; then
-    echo "The WiFi driver is loaded now; it stays off from the next boot."
-fi
-# Clean up after older bobcat-gw versions: WiFi/hotspot profiles, captive portal, and the
-# cold-reboot hook (warm reboots are fine without WiFi).
+# Clean up after older bobcat-gw versions: their WiFi/hotspot profiles, captive portal and
+# cold-reboot hook. (WiFi set up in the web UI now uses the bobcat-gw-wifi profile.)
 for c in bobcat-wifi bobcat-hotspot; do nmcli connection delete "$c" >/dev/null 2>&1 || true; done
 rm -f /etc/NetworkManager/dnsmasq-shared.d/bobcat-gw.conf /etc/bobcat-gw/wifi-ca.pem \
       /usr/lib/systemd/system-shutdown/bobcat-gw-cold-reboot
+# --wifi-ssid: save that network (the same profile the web UI writes). Enterprise WiFi
+# is set up in the web UI only.
+if [ -n "$WIFI_SSID" ]; then
+    if [ -f "$NO_WIFI" ]; then
+        echo "Not saving WiFi network $WIFI_SSID: WiFi is off on this gateway."
+    else
+        BGW_WIFI_SSID="$WIFI_SSID" BGW_WIFI_PASSWORD="$WIFI_PASSWORD" BGW_WIFI_HIDDEN="$WIFI_HIDDEN" \
+            python3 "$APP/web/bobcat_gw.py" --wifi-setup || echo "Warning: the WiFi network was not saved"
+    fi
+fi
+unset WIFI_PASSWORD
 
 # ------------------------------------------------------------------
 step "Reducing SD card writes"
@@ -458,7 +483,13 @@ systemctl is-active --quiet avahi-daemon 2>/dev/null && echo "               htt
 echo "Gateway EUI  : $(get gateway_eui)"
 echo "Backend      : $(get backend)   region $(get region)"
 echo
-echo "Network      : Ethernet only (the onboard WiFi is disabled)"
+if [ -f "$NO_WIFI" ]; then
+    echo "Network      : Ethernet only (the onboard WiFi is off: no WiFi fix for this device tree)"
+elif ! lsmod | grep -q '^brcmfmac'; then
+    echo "Network      : Ethernet; WiFi works after a reboot, then set it up on the Network tab"
+else
+    echo "Network      : Ethernet and WiFi (set up WiFi on the web UI's Network tab)"
+fi
 echo
 echo "Next: open the web UI, choose the LNS connection on the LNS tab, and"
 echo "register the gateway EUI on your network server."

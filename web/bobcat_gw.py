@@ -7,8 +7,7 @@ Single process, standard library only. It
     Semtech UDP packet forwarder, or ChirpStack MQTT Forwarder),
   * starts/stops the backend systemd units,
   * follows the backend journals to collect gateway statistics,
-  * reports the network interfaces (Ethernet only: the onboard BCM43430 WiFi is
-    disabled because its driver can hang the board, see README),
+  * reports the network interfaces and sets up the onboard WiFi (NetworkManager),
   * serves the web UI and its JSON API.
 """
 import base64
@@ -30,6 +29,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid as uuidlib
 
 VERSION = "0.1.6"
 
@@ -121,9 +121,14 @@ def run(cmd, timeout=30, check=False):
 def write_file(path, content, mode=0o644):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    # Created with its final mode, so a secret is never readable by others, not even briefly.
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode), "w") as f:
         f.write(content)
-    os.chmod(tmp, mode)
+    os.chmod(tmp, mode)   # in case the umask took bits away
     os.replace(tmp, path)
 
 
@@ -515,8 +520,8 @@ class ConfigStore:
         except (OSError, ValueError):
             data = {}
         cfg = deep_merge(DEFAULT_CONFIG, data)
-        # Older versions kept WiFi and setup hotspot settings (with passwords) here. The
-        # gateway is Ethernet-only now, so drop them, also from the file on disk.
+        # Older versions kept WiFi and setup hotspot settings (with passwords) here. WiFi now
+        # lives in its NetworkManager profile only, so drop them, also from the file on disk.
         if data.pop("network", None) is not None:
             cfg.pop("network", None)
             write_file(CONFIG_PATH, json.dumps(cfg, indent=2), 0o600)
@@ -1269,16 +1274,219 @@ def nm_split(line):
     return out
 
 
+# WiFi set up here (or by install.sh --wifi-ssid / the image's wifi.txt) is one NetworkManager
+# keyfile profile, written directly so passwords never appear on a command line. Profiles made
+# by hand (nmcli) are shown and can be removed, but not edited.
+WIFI_CON = "bobcat-gw-wifi"
+NM_CONN_DIR = os.environ.get("BOBCAT_GW_NM_DIR", "/etc/NetworkManager/system-connections")
+WIFI_KEYFILE = os.path.join(NM_CONN_DIR, WIFI_CON + ".nmconnection")
+WIFI_CA_PATH = os.path.join(CONF_DIR, "wifi", "ca.pem")
+WIFI_BLOCKED = "/etc/modprobe.d/bobcat-gw-no-wifi.conf"
+WIFI_SECURITY = ("psk", "sae", "enterprise", "open")
+WIFI_EAP = {"peap": ("mschapv2", "gtc", "md5"), "ttls": ("pap", "mschapv2", "mschap", "chap")}
+WIFI_CA_MODES = ("system", "custom", "none")
+NMCLI = ["nmcli", "--wait", "10"]   # every nmcli call is bounded: a stuck WiFi stack must not hang the UI
+
+
+def keyfile_escape(v):
+    """A string value for a NetworkManager keyfile (GKeyFile syntax)."""
+    v = v.replace("\\", "\\\\")
+    if v.startswith(" "):
+        v = "\\s" + v[1:]
+    if v.endswith(" "):
+        v = v[:-1] + "\\s"
+    return v
+
+
+def keyfile_unescape(v):
+    out, i = "", 0
+    while i < len(v):
+        if v[i] == "\\" and i + 1 < len(v):
+            out += {"s": " ", "n": "\n", "t": "\t", "r": "\r", "\\": "\\"}.get(v[i + 1], v[i + 1])
+            i += 2
+        else:
+            out += v[i]
+            i += 1
+    return out
+
+
+def read_keyfile(path):
+    """{section: {key: value}} of a keyfile, or {} if there is none."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return {}
+    data, sec = {}, None
+    for line in lines:
+        line = line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            sec = data.setdefault(line[1:-1], {})
+        elif sec is not None and "=" in line and not line.startswith("#"):
+            k, v = line.split("=", 1)
+            sec[k.strip()] = keyfile_unescape(v.strip())
+    return data
+
+
+def keyfile_ssid(v):
+    """SSID from a keyfile: plain text, or the list of byte values this module writes."""
+    if re.fullmatch(r"(\d{1,3};)+\d{0,3}", v or ""):
+        try:
+            return bytes(int(b) for b in v.split(";") if b).decode("utf-8", "replace")
+        except ValueError:
+            pass
+    return v or ""
+
+
+def clean_wifi(s, old=None):
+    """Check WiFi settings from the web UI (or install.sh). Secrets given as SECRET_MASK keep
+    the stored ones (old: the settings read back from the profile, with secrets)."""
+    old = old or {}
+    w = {"ssid": str(s.get("ssid", "")), "hidden": bool(s.get("hidden")),
+         "security": str(s.get("security", "psk"))}
+    if not w["ssid"] or len(w["ssid"].encode()) > 32:
+        raise ValueError("The network name (SSID) must be 1 to 32 bytes.")
+    if w["security"] not in WIFI_SECURITY:
+        raise ValueError("Unknown WiFi security type.")
+
+    def text(key, label, limit=256, keep=False):
+        v = str(s.get(key, "") or "")
+        if keep and v == SECRET_MASK:
+            v = old.get(key, "")
+        if len(v) > limit or any(ord(c) < 32 or ord(c) == 127 for c in v):
+            raise ValueError(f"{label}: up to {limit} characters, no control characters.")
+        return v
+
+    if w["security"] in ("psk", "sae"):
+        w["password"] = text("password", "Password", 64, keep=old.get("security") in ("psk", "sae"))
+        if not 8 <= len(w["password"]) <= 63 and not re.fullmatch(r"[0-9A-Fa-f]{64}", w["password"]):
+            raise ValueError("A WPA password has 8 to 63 characters.")
+    elif w["security"] == "enterprise":
+        keep = old.get("security") == "enterprise"
+        w["eap"] = str(s.get("eap", "peap"))
+        if w["eap"] not in WIFI_EAP:
+            raise ValueError("EAP method: PEAP or TTLS.")
+        w["phase2"] = str(s.get("phase2", WIFI_EAP[w["eap"]][0]))
+        if w["phase2"] not in WIFI_EAP[w["eap"]]:
+            raise ValueError(f"Inner authentication for {w['eap'].upper()}: " + ", ".join(p.upper() for p in WIFI_EAP[w["eap"]]) + ".")
+        w["identity"] = text("identity", "Username")
+        w["password"] = text("password", "Password", keep=keep)
+        w["anonymous_identity"] = text("anonymous_identity", "Anonymous identity")
+        w["domain"] = text("domain", "Server domain")
+        if not w["identity"] or not w["password"]:
+            raise ValueError("Enterprise WiFi needs a username and password.")
+        w["ca"] = str(s.get("ca", "system"))
+        if w["ca"] not in WIFI_CA_MODES:
+            raise ValueError("Unknown server certificate check.")
+        if w["ca"] == "custom":
+            pem = str(s.get("ca_cert", "") or "").strip()
+            if pem == SECRET_MASK or (not pem and keep):
+                pem = old.get("ca_cert", "")
+            if "-----BEGIN CERTIFICATE-----" not in pem or len(pem) > 65536:
+                raise ValueError("Paste or upload the CA certificate (PEM).")
+            w["ca_cert"] = pem.strip() + "\n"
+    return w
+
+
+def wifi_keyfile(w, uuid):
+    """The NetworkManager keyfile for settings checked by clean_wifi."""
+    e = keyfile_escape
+    lines = ["[connection]", f"id={WIFI_CON}", f"uuid={uuid}", "type=wifi",
+             # below Ethernet's default route (NetworkManager gives WiFi a higher metric anyway);
+             # retry forever, so the gateway comes back by itself after an access point outage
+             "autoconnect=true", "autoconnect-priority=10", "autoconnect-retries=0", "",
+             "[wifi]", "mode=infrastructure",
+             # bytes, so any SSID (spaces, ;, non-ASCII) survives the keyfile format
+             "ssid=" + "".join(f"{b};" for b in w["ssid"].encode()),
+             f"hidden={'true' if w['hidden'] else 'false'}", ""]
+    if w["security"] in ("psk", "sae"):
+        lines += ["[wifi-security]", f"key-mgmt={'sae' if w['security'] == 'sae' else 'wpa-psk'}",
+                  f"psk={e(w['password'])}", ""]
+    elif w["security"] == "enterprise":
+        lines += ["[wifi-security]", "key-mgmt=wpa-eap", "",
+                  "[802-1x]", f"eap={w['eap']};", f"identity={e(w['identity'])}",
+                  f"password={e(w['password'])}", f"phase2-auth={w['phase2']}"]
+        if w["anonymous_identity"]:
+            lines.append(f"anonymous-identity={e(w['anonymous_identity'])}")
+        if w["domain"]:
+            lines.append(f"domain-suffix-match={e(w['domain'])}")
+        if w["ca"] == "system":
+            lines.append("system-ca-certs=true")
+        elif w["ca"] == "custom":
+            lines.append(f"ca-cert={e(WIFI_CA_PATH)}")
+        if w["ca"] != "none":
+            # The board starts with a 2017 clock (no RTC) and needs the network for NTP, so a
+            # WiFi-only gateway could never accept the server's certificate: skip the date check
+            # (the certificate itself is still verified).
+            lines.append("phase1-auth-flags=8")
+        lines.append("")
+    lines += ["[ipv4]", "method=auto", "", "[ipv6]", "addr-gen-mode=default", "method=auto", ""]
+    return "\n".join(lines)
+
+
+def wifi_saved():
+    """The settings in our profile, with secrets, or None."""
+    k = read_keyfile(WIFI_KEYFILE)
+    if not k:
+        return None
+    sec, x = k.get("wifi-security", {}), k.get("802-1x", {})
+    w = {"ssid": keyfile_ssid(k.get("wifi", {}).get("ssid")),
+         "hidden": k.get("wifi", {}).get("hidden") == "true", "uuid": k.get("connection", {}).get("uuid", "")}
+    mgmt = sec.get("key-mgmt", "")
+    if mgmt == "wpa-eap":
+        ca = "custom" if x.get("ca-cert") else "system" if x.get("system-ca-certs") == "true" else "none"
+        w.update(security="enterprise", eap=x.get("eap", "peap").rstrip(";").split(";")[0],
+                 phase2=x.get("phase2-auth", ""), identity=x.get("identity", ""), password=x.get("password", ""),
+                 anonymous_identity=x.get("anonymous-identity", ""), domain=x.get("domain-suffix-match", ""), ca=ca)
+        if ca == "custom":
+            try:
+                with open(WIFI_CA_PATH, encoding="utf-8") as f:
+                    w["ca_cert"] = f.read()
+            except OSError:
+                w["ca_cert"] = ""
+    elif mgmt in ("wpa-psk", "sae"):
+        w.update(security="sae" if mgmt == "sae" else "psk", password=sec.get("psk", ""))
+    else:
+        w["security"] = "open"
+    return w
+
+
+def scan_security(flags):
+    """nmcli's SECURITY column ("WPA2 802.1X", "WPA3", "WPA1 WPA2", "") -> our security type."""
+    if "802.1X" in flags:
+        return "enterprise"
+    if "WPA3" in flags and "WPA2" not in flags and "WPA1" not in flags:
+        return "sae"
+    return "psk" if flags.strip() and flags.strip() != "--" else "open"
+
+
+def write_wifi(w):
+    """Write and load our profile. NetworkManager connects to it by itself."""
+    old = wifi_saved() or {}
+    uuid = old.get("uuid") or str(uuidlib.uuid4())
+    if w.get("ca") == "custom":
+        write_file(WIFI_CA_PATH, w["ca_cert"], 0o600)
+    else:
+        try:
+            os.unlink(WIFI_CA_PATH)
+        except FileNotFoundError:
+            pass
+    write_file(WIFI_KEYFILE, wifi_keyfile(w, uuid), 0o600)
+    os.sync()
+    rc, out = run(NMCLI + ["connection", "load", WIFI_KEYFILE], timeout=20)
+    if rc != 0:
+        raise RuntimeError("NetworkManager did not accept the WiFi settings: " + out.strip())
+
+
 class Network:
-    """Read-only view of the wired network. The gateway is Ethernet-only: the onboard
-    BCM43430 WiFi is disabled (its driver can jam the SDIO bus and hang the board)."""
+    """The network interfaces (Ethernet and the onboard BCM43430 WiFi) and WiFi setup."""
 
     def devices(self):
-        rc, out = run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"])
+        rc, out = run(NMCLI + ["-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"], timeout=15)
         devs = []
         for line in out.splitlines():
             f = nm_split(line)
-            if len(f) >= 4 and f[1] == "ethernet":
+            if len(f) >= 4 and f[1] in ("ethernet", "wifi"):
                 devs.append({"device": f[0], "type": f[1], "state": f[2], "connection": f[3]})
         rc, out = run(["ip", "-j", "addr"])
         try:
@@ -1297,7 +1505,115 @@ class Network:
     def status(self):
         devs = self.devices()
         return {"devices": devs,
-                "online": any(d["state"] == "connected" and d["ipv4"] for d in devs)}
+                "online": any(d["state"] == "connected" and d["ipv4"] for d in devs),
+                "wifi": self.wifi_status(devs)}
+
+    # ---- WiFi
+
+    def wifi_profiles(self):
+        """Names of all saved WiFi profiles (ours and any made by hand)."""
+        rc, out = run(NMCLI + ["-t", "-f", "NAME,TYPE", "connection", "show"], timeout=15)
+        return [f[0] for f in map(nm_split, out.splitlines()) if len(f) >= 2 and f[1] == "802-11-wireless"]
+
+    def wifi_status(self, devs=None):
+        devs = self.devices() if devs is None else devs
+        dev = next((d for d in devs if d["type"] == "wifi"), None)
+        w = {"present": dev is not None, "blocked": os.path.exists(WIFI_BLOCKED),
+             "device": dev and dev["device"], "state": dev["state"] if dev else "",
+             "connection": dev["connection"] if dev and dev["connection"] != "--" else "",
+             "ipv4": dev["ipv4"] if dev else [], "mac": dev["mac"] if dev else "",
+             "ssid": "", "signal": None, "freq": "", "profile": None, "others": []}
+        saved = wifi_saved()
+        if saved:
+            # The settings for the form, without secrets
+            w["profile"] = {k: v for k, v in saved.items() if k not in ("password", "ca_cert", "uuid")}
+            w["profile"]["has_password"] = bool(saved.get("password"))
+            w["profile"]["has_ca_cert"] = bool(saved.get("ca_cert"))
+        if not dev:
+            return w
+        w["others"] = [n for n in self.wifi_profiles() if n != WIFI_CON]
+        if dev["state"] == "connected":
+            # the cached scan list: no rescan here, as the dashboard polls this
+            rc, out = run(NMCLI + ["-t", "-f", "ACTIVE,SSID,SIGNAL,FREQ", "device", "wifi", "list",
+                                   "--rescan", "no"], timeout=15)
+            for f in map(nm_split, out.splitlines()):
+                if len(f) >= 4 and f[0] == "yes":
+                    w.update(ssid=f[1], freq=f[3])
+                    try:
+                        w["signal"] = int(f[2])
+                    except ValueError:
+                        pass
+            if not w["ssid"] and saved and dev["connection"] == WIFI_CON:
+                w["ssid"] = saved["ssid"]   # hidden networks may be missing from the list
+        return w
+
+    def wifi_scan(self):
+        rc, out = run(NMCLI + ["-t", "-f", "SSID,SIGNAL,FREQ,SECURITY", "device", "wifi", "list",
+                               "--rescan", "yes"], timeout=30)
+        if rc != 0:
+            raise RuntimeError("Scan failed: " + (out.strip() or "is the WiFi on?"))
+        nets = {}
+        for f in map(nm_split, out.splitlines()):
+            if len(f) < 4 or not f[0]:
+                continue   # hidden networks have no name to show
+            try:
+                sig = int(f[1])
+            except ValueError:
+                sig = 0
+            if f[0] not in nets or sig > nets[f[0]]["signal"]:
+                nets[f[0]] = {"ssid": f[0], "signal": sig, "freq": f[2],
+                              "security": scan_security(f[3]), "flags": f[3]}
+        return sorted(nets.values(), key=lambda n: -n["signal"])
+
+    def wifi_connect(self, settings):
+        """Save the settings to our profile and connect. Returns a message for the UI."""
+        if os.path.exists(WIFI_BLOCKED):
+            raise ValueError("WiFi is switched off on this gateway because its device tree has no "
+                             "WiFi fix. Re-run install.sh to install it, then reboot.")
+        w = clean_wifi(settings, wifi_saved())
+        write_wifi(w)
+        rc, out = run(["nmcli", "--wait", "45", "connection", "up", WIFI_CON], timeout=60)
+        if rc != 0:
+            msg = out.strip().splitlines()[-1] if out.strip() else "no answer"
+            raise RuntimeError(f"Saved, but could not connect yet ({msg}). "
+                               "The gateway keeps trying in the background.")
+        return f"Connected to {w['ssid']}."
+
+    def wifi_forget(self, name):
+        if name == WIFI_CON:
+            run(NMCLI + ["connection", "delete", WIFI_CON], timeout=20)
+            for p in (WIFI_KEYFILE, WIFI_CA_PATH):
+                try:
+                    os.unlink(p)
+                except FileNotFoundError:
+                    pass
+            return
+        if name not in self.wifi_profiles():
+            raise ValueError("No such WiFi profile.")
+        rc, out = run(NMCLI + ["connection", "delete", name], timeout=20)
+        if rc != 0:
+            raise RuntimeError(out.strip())
+
+
+def wifi_setup_cli():
+    """install.sh --wifi-ssid / the image's wifi.txt: save a WiFi network (open or WPA
+    Personal) from the environment (BGW_WIFI_SSID, BGW_WIFI_PASSWORD, BGW_WIFI_HIDDEN,
+    BGW_WIFI_SECURITY) so the password is never on a command line."""
+    pw = os.environ.get("BGW_WIFI_PASSWORD", "")
+    s = {"ssid": os.environ.get("BGW_WIFI_SSID", ""), "password": pw,
+         "hidden": os.environ.get("BGW_WIFI_HIDDEN", "") in ("1", "yes", "true"),
+         "security": os.environ.get("BGW_WIFI_SECURITY", "") or ("psk" if pw else "open")}
+    if s["security"] == "enterprise":
+        print("Enterprise WiFi can only be set up in the web UI.")
+        return 2
+    try:
+        w = clean_wifi(s)
+        write_wifi(w)
+    except (ValueError, RuntimeError) as e:
+        print(f"WiFi: {e}")
+        return 1
+    print(f"WiFi: saved {w['ssid']}{' (hidden)' if w['hidden'] else ''}; it connects by itself.")
+    return 0
 
 
 # --------------------------------------------------------------------------
@@ -2230,8 +2546,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             APP._units_time = 0
             return self.send_json({"ok": True})
         if a == "reboot":
-            # Reply first, then reboot. A plain warm reboot is safe now that the WiFi
-            # driver, which used to hang the board while starting, is disabled.
+            # Reply first, then reboot. A plain warm reboot is safe: the WiFi driver, which used
+            # to hang the board while starting, only runs with the fixed device tree.
             def later():
                 time.sleep(1)
                 os.sync()
@@ -2259,6 +2575,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if a == "ssh_disable":
             run(["systemctl", "disable", "--now", "ssh"], timeout=60)
             return self.send_json({"ok": True, **ssh_status()})
+        if a in ("wifi_scan", "wifi_connect", "wifi_forget"):
+            try:
+                if a == "wifi_scan":
+                    return self.send_json({"ok": True, "networks": APP.net.wifi_scan()})
+                if a == "wifi_connect":
+                    msg = APP.net.wifi_connect(body.get("wifi") or {})
+                else:
+                    APP.net.wifi_forget(str(body.get("name", "")))
+                    msg = "Forgotten."
+            except (ValueError, RuntimeError) as e:
+                return self.send_json({"error": str(e), "wifi": APP.net.wifi_status()}, 400)
+            return self.send_json({"ok": True, "message": msg, "wifi": APP.net.wifi_status()})
         if a in ("ts_up", "ts_down", "ts_logout"):
             try:
                 if a == "ts_up":
@@ -2339,6 +2667,8 @@ def main():
         sys.exit(run_update(sys.argv[sys.argv.index("--update") + 1]))
     if "--update-cli" in sys.argv:
         sys.exit(update_cli(sys.argv))
+    if "--wifi-setup" in sys.argv:
+        sys.exit(wifi_setup_cli())
     APP = App()
     JournalFollower(APP.stats).start()
     threading.Thread(target=update_checker, daemon=True).start()

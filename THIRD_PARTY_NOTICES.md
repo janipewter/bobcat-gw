@@ -8,6 +8,7 @@ bobcat-gw itself is under the MIT License (see [LICENSE](LICENSE)). It also ship
 | [LoRa Basics Station](https://github.com/lorabasics/basicstation) | v2.0.6 | `prebuilt/aarch64/station` | BSD 3-Clause (Semtech) |
 | [Mbed TLS](https://github.com/Mbed-TLS/mbedtls) | 2.28.0 | built into `station` | Apache-2.0 |
 | [ChirpStack MQTT Forwarder](https://github.com/chirpstack/chirpstack-mqtt-forwarder) | 4.6.1 | downloaded by the installer, included in the ready-made image | MIT |
+| Bobcat 300 G285 device tree, with the WiFi fix by [sicXnull](https://gist.github.com/sicXnull/012a38b7e8c022f866d7e3ecdc494014) | – | `files/dtb/rk3566-bobcat.dts` and the `.dtb` built from it | The Linux kernel's licence for its device trees (the RK3566 ones are GPL-2.0+ OR MIT) |
 
 The sx1302_hal and Basics Station binaries are built from the upstream source with one change:
 `files/patch_hal_tempsensor.py` makes the HAL use a fixed 25 °C instead of failing when it finds no

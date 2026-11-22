@@ -37,6 +37,7 @@
   - recent packets with full ISO timestamps, RSSI and SNR
   - service logs, system health, time sync status, and the gateway's time zone
 - **Password-protected**: one password for the web UI and root, and SSH stays off until you turn it on.
+- **Ethernet or WiFi**: the built-in WiFi works, set up from the web UI, including hidden networks and WPA2/WPA3-Enterprise (802.1X: PEAP or TTLS). With both connected, Ethernet is used and WiFi takes over if it goes down.
 - **Remote access** through Tailscale, set up from the web UI.
 - **Updates from GitHub**: the web UI tells you when a new release is out, and installs it with one click when you choose (or `bobcat-gw-update` over SSH), keeping your settings.
 - **Boot protection**: the kernel, device tree and U-Boot packages are held, so `apt upgrade` can't replace them with versions that don't boot on the Bobcat.
@@ -45,7 +46,7 @@
 ## Requirements
 
 - A **Bobcat 300 G285** and a **microSD card** of 8 GB or more.
-- **Ethernet.** bobcat-gw is Ethernet-only and switches the built-in WiFi off. See [Why Ethernet only?](#why-ethernet-only)
+- **Ethernet or WiFi** (2.4 GHz). For the first setup, Ethernet is easiest; the ready-made image can also join a WiFi network from the first boot. See [WiFi](#wifi).
 - Only if you use the installer instead of the ready-made image: Armbian on the microSD card. Flash the G285 image from [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) and follow its "G285 – SD Card Boot" and "First Boot" steps.
 
 ## Ready-made image
@@ -57,7 +58,7 @@ The quickest way: flash a ready-made SD card image and boot straight into the ga
 With [Balena Etcher](https://etcher.balena.io/) installed, the button opens it with the latest image (0.1.6) selected: pick your microSD card and flash. Then continue at step 2.
 
 1. Download `bobcat-gw-<version>-g285.img.xz` from the [releases page](https://github.com/janipewter/bobcat-gw/releases) and flash it to a microSD card (8 GB or more) with [Balena Etcher](https://etcher.balena.io/) or `dd`. The `.sha256` file next to it lets you check the download.
-2. Put the card in the Bobcat, connect Ethernet, and power it on.
+2. Put the card in the Bobcat, connect Ethernet, and power it on. No Ethernet? Before you put the card in, open its boot partition on your computer and fill in `bobcat-gw/wifi.txt` with your WiFi network's name and password (open or WPA2/WPA3 Personal networks; see [WiFi](#wifi)).
 3. Wait a few minutes while it sets itself up on first boot, then open **http://bobcat-285.local/** (or the IP address your router gave it) and sign in with the default password **bobcat**. You'll be asked to choose a new one straight away.
 
 The image is the [Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) G285 image with bobcat-gw added. On first boot it grows to fill the card and runs the installer below, unattended (log: `/var/log/bobcat-gw-install.log`). The web UI password is also root's password: changing one changes both. SSH is off until you turn it on with **Enable SSH** on the System tab (after the default password has been changed). To have SSH from the first boot, put your public key in `bobcat-gw/authorized_keys` on the card's boot partition before the first boot. The first boot works without internet; only the `.local` name and Tailscale need it.
@@ -99,7 +100,7 @@ The installer:
 3. stops any old packet forwarder or Helium Docker containers that would compete for the concentrator;
 4. installs the prebuilt Basics Station and packet forwarder from `prebuilt/aarch64/`, downloads the ChirpStack MQTT Forwarder, and installs Tailscale from its official repository;
 5. installs the web UI, its services, and the `bobcat-gw-update` command;
-6. switches the built-in WiFi off;
+6. installs the device tree that makes the built-in WiFi work (see [WiFi](#wifi)), or keeps the WiFi off where it can't;
 7. keeps logs in RAM to spare the SD card (see [SD card wear](#sd-card-wear));
 8. sets up chrony to keep the clock tightly synced (see [Time sync](#time-sync));
 9. makes the gateway reachable as `http://<hostname>.local/` (avahi), if the package can be installed;
@@ -114,6 +115,8 @@ Options:
 | `--password <pw>` | Set the password without prompting (for the web UI and root, which share it) |
 | `--default-password` | Use the default password `bobcat` (web UI and root); the web UI asks for a new one on first login |
 | `--no-tailscale` | Don't install Tailscale |
+| `--wifi-ssid <name>` | Save this WiFi network (open or WPA2/WPA3 Personal). The password is asked for, or taken from the `WIFI_PASSWORD` environment variable, so it never shows up in the process list. Enterprise WiFi is set up in the web UI. |
+| `--wifi-hidden` | With `--wifi-ssid`: the network is hidden (doesn't broadcast its name) |
 | `--build-on-device` | Compile the packet forwarder and Basics Station on the gateway instead of using the prebuilt binaries (very slow) |
 | `--force` | Install on a board that isn't a G285 (also set `SPI_DEV=`) |
 
@@ -129,7 +132,7 @@ Open `http://<gateway-ip>/` (or `http://<hostname>.local/`) and sign in.
 |---|---|
 | **Dashboard** | Connection state, packet counters, the 24-hour chart, and recent packets |
 | **LNS** | Connection method (or monitor only), preset, region, for US915/AU915 the sub-band, and the gateway's location. Keys and certificates can be pasted or loaded from a file. Saving restarts the backend with the new settings. |
-| **Network** | The Ethernet interface, and Tailscale |
+| **Network** | The interfaces, WiFi (scan, connect, forget), and Tailscale |
 | **System** | Health, the hostname, updates, boot protection status, time sync and time zone, service logs, restarting the services, rebooting, SSH on/off, and the password (for the web UI and root) |
 
 ### The Things Network
@@ -167,13 +170,24 @@ The gateway EUI is the SX1302 chip's own EUI-64, for example `0016C001F1501019`.
 
 The Bobcat's Ethernet MAC is a locally administered address, so an EUI derived from it isn't guaranteed to be unique. bobcat-gw only falls back to it if the installer couldn't read the concentrator.
 
-## Why Ethernet only?
+## WiFi
 
-The Bobcat's built-in WiFi (a BCM43430 on SDIO, driver `brcmfmac`) is switched off, and bobcat-gw has no WiFi features.
+The Bobcat's built-in WiFi is a BCM43430 (2.4 GHz only, driver `brcmfmac`). Set it up on the web UI's **Network** tab: **Scan**, pick a network (or type the name of a hidden one), choose the security, and **Save and connect**. The gateway reconnects by itself after reboots and access point outages. With Ethernet and WiFi both connected, traffic goes over Ethernet, and WiFi takes over if Ethernet goes down.
 
-When the driver starts the chip, it downloads the chip's firmware over the SDIO bus. If the microSD card is being read at the same moment, the SDIO bus jams: one CPU core gets stuck in the SDIO interrupt handler, NetworkManager and everything else that touches the network blocks, and the gateway drops off the network until it is power-cycled. At boot the SD card is always busy, so this happened on most warm reboots and on some cold starts. It looked like "the Bobcat hangs on reboot". With the driver disabled, warm reboots were reliable (10 of 10 in testing).
+- **Personal**: WPA2/WPA3 Personal (the usual home network), WPA3 Personal only, or an open network.
+- **Enterprise (802.1X)**: PEAP or TTLS with a username and password, inner authentication MSCHAPv2, PAP, GTC and others. The RADIUS server's certificate is checked against the public CAs or against your own CA certificate (pasted or uploaded); set the server domain too, so that only your server's certificate is accepted. Because the Bobcat has no clock battery and starts in 2017 until it reaches a time server, the certificate's validity dates aren't checked (the certificate itself is). EAP-TLS (client certificates) isn't supported.
+- **Before the first boot**: the ready-made image has `bobcat-gw/wifi.txt` on its boot partition (FAT, readable on any computer). Fill in `SSID=` and `PASSWORD=` (and `HIDDEN=yes` for a hidden network) and the first boot joins that network. The file is deleted once the network is saved, as it holds the password.
+- **When installing**: `sudo ./install.sh --wifi-ssid "My network"` asks for the password (or reads `WIFI_PASSWORD`). Add `--wifi-hidden` for a hidden network.
 
-The installer adds `/etc/modprobe.d/bobcat-gw-no-wifi.conf`, which stops the driver from loading. Starting it later, waiting for the SD card to go quiet, or reading its files into memory first only made the problem less frequent. A proper fix most likely needs a device tree change in the Armbian image: the shipped device tree only describes the WiFi chip with Rockchip's vendor binding, so mainline Linux uses in-band SDIO interrupts instead of the chip's out-of-band host-wake line (GPIO2_B2).
+The network is saved as the NetworkManager profile `bobcat-gw-wifi` (`/etc/NetworkManager/system-connections/`, readable by root only). Profiles made by hand with `nmcli` keep working; the web UI shows them and can forget them.
+
+### The device tree fix
+
+On the device tree that Bobcat-Armbian ships, the WiFi used to hang the board. When the driver starts the chip, it downloads the chip's firmware over the SDIO bus. If the microSD card is busy at the same moment, which it always is during boot, the SDIO bus jammed: NetworkManager and everything else that touches the network blocked, and only a power cycle brought the gateway back. bobcat-gw kept the driver switched off until this was fixed.
+
+The fix, from [sicXnull](https://github.com/sicXnull/Bobcat-Armbian), describes the WiFi chip for the mainline driver, with its out-of-band host-wake interrupt on GPIO2_B2, and stops Rockchip's vendor WiFi node from claiming that pin. bobcat-gw ships it as [files/dtb/rk3566-bobcat.dts](files/dtb/rk3566-bobcat.dts). The installer (and the image build) puts the compiled file in place of `/boot/dtb/rockchip/rk3566-bobcat.dtb`, the device tree Bobcat-Armbian's boot script loads, and keeps the original in `/boot/bobcat-gw/rk3566-bobcat.dtb.orig`. It leaves the device tree alone if it already has the fix (a newer Bobcat-Armbian image), and it keeps the WiFi driver blocked (`/etc/modprobe.d/bobcat-gw-no-wifi.conf`) wherever it can't install the fix. With the fixed device tree, a test G285 came through 13 warm reboots in a row with WiFi connected, and through WiFi downloads while the SD card was writing.
+
+To go back to the original device tree, copy `bobcat-gw/rk3566-bobcat.dtb.orig` over `dtb/rockchip/rk3566-bobcat.dtb` on the boot partition (it is FAT, so any computer can do it), and remove the WiFi profile first so the driver isn't left running on the old device tree.
 
 ## SD card wear
 
@@ -247,14 +261,14 @@ The **What's new** link on the System tab opens the tag's page, with or without 
 
 - Tested on three G285s. The G280 (SX1301) isn't supported; the G29x uses a different SPI device and is untested.
 - The packet forwarder channel plans cover EU868, US915, AU915, AS923-1 and KR920. With Basics Station the network server sends the channel plan.
-- Ethernet only (see [Why Ethernet only?](#why-ethernet-only)).
+- WiFi is 2.4 GHz only (the BCM43430 has no 5 GHz), and enterprise WiFi doesn't support EAP-TLS (client certificates).
 - No GPS, so no Class B beacons and no fine timestamps.
 - The web UI is plain HTTP for the local network. Don't expose port 80 to the internet; use Tailscale for remote access.
 
 ## Credits
 
 - **[AdvdLaar/Bobcat300-TTN](https://github.com/AdvdLaar/Bobcat300-TTN)**: the inspiration for this project, the original Bobcat 300 TTN conversion, and the G285 reset sequence.
-- [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian): Armbian for the Bobcat 300.
+- [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian): Armbian for the Bobcat 300, and the device tree fix that makes its WiFi work.
 - [metrafonic/Bobcat300-DebianMinimalDocker](https://github.com/metrafonic/Bobcat300-DebianMinimalDocker) and r00t1ng: earlier work on the concentrator reset.
 - [Basics Station](https://github.com/lorabasics/basicstation), Semtech [sx1302_hal](https://github.com/Lora-net/sx1302_hal), and the [ChirpStack MQTT Forwarder](https://github.com/chirpstack/chirpstack-mqtt-forwarder). Their licences are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - [Claude Opus](https://claude.com/claude-code): wrote the code.

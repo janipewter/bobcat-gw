@@ -2,3 +2,4 @@
 prebuilt/** -text
 *.sh text eol=lf
 *.py text eol=lf
+*.dtb -text

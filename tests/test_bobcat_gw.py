@@ -22,6 +22,7 @@ ENV = {
     "BOBCAT_GW_APP": os.path.join(TMP, "app"),
     "BOBCAT_GW_CONF": os.path.join(TMP, "conf"),
     "BOBCAT_GW_STATE": os.path.join(TMP, "state"),
+    "BOBCAT_GW_NM_DIR": os.path.join(TMP, "nm"),
 }
 os.environ.update(ENV)
 sys.path.insert(0, os.path.join(ROOT, "web"))
@@ -289,6 +290,76 @@ class WebStartup(unittest.TestCase):
                 p.kill()
                 p.wait()
             p.stdout.close()
+
+
+class Wifi(unittest.TestCase):
+    ENT = {"ssid": "BadgerNet", "security": "enterprise", "eap": "ttls", "phase2": "pap",
+           "identity": "user@example.org", "password": " p\\a;ss=# ", "domain": "radius.example.org",
+           "ca": "system"}
+
+    def tearDown(self):
+        for p in (bg.WIFI_KEYFILE, bg.WIFI_CA_PATH):
+            if os.path.exists(p):
+                os.unlink(p)
+
+    def save(self, w):
+        os.makedirs(bg.NM_CONN_DIR, exist_ok=True)
+        if w.get("ca") == "custom":
+            bg.write_file(bg.WIFI_CA_PATH, w["ca_cert"], 0o600)
+        bg.write_file(bg.WIFI_KEYFILE, bg.wifi_keyfile(w, "11111111-2222-3333-4444-555555555555"), 0o600)
+
+    def test_personal_hidden_ssid_with_space(self):
+        w = bg.clean_wifi({"ssid": "BadgerNet IoT", "hidden": True, "password": "secret123"})
+        text = bg.wifi_keyfile(w, "u")
+        self.assertIn("ssid=66;97;100;103;101;114;78;101;116;32;73;111;84;", text)
+        self.assertIn("hidden=true", text)
+        self.assertIn("key-mgmt=wpa-psk", text)
+        self.save(w)
+        s = bg.wifi_saved()
+        self.assertEqual((s["ssid"], s["hidden"], s["security"], s["password"]),
+                         ("BadgerNet IoT", True, "psk", "secret123"))
+        self.assertEqual(oct(os.stat(bg.WIFI_KEYFILE).st_mode & 0o777), "0o600")
+
+    def test_enterprise_round_trip_and_masked_password(self):
+        w = bg.clean_wifi(self.ENT)
+        text = bg.wifi_keyfile(w, "u")
+        for line in ("key-mgmt=wpa-eap", "eap=ttls;", "phase2-auth=pap", "system-ca-certs=true",
+                     "domain-suffix-match=radius.example.org", "phase1-auth-flags=8"):
+            self.assertIn(line, text.splitlines())
+        self.save(w)
+        s = bg.wifi_saved()
+        self.assertEqual(s["password"], " p\\a;ss=# ")
+        self.assertEqual((s["eap"], s["phase2"], s["identity"], s["ca"]), ("ttls", "pap", "user@example.org", "system"))
+        again = bg.clean_wifi(dict(self.ENT, password=bg.SECRET_MASK), s)
+        self.assertEqual(again["password"], s["password"])
+
+    def test_custom_ca_and_no_check(self):
+        pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
+        w = bg.clean_wifi(dict(self.ENT, ca="custom", ca_cert=pem))
+        self.assertIn("ca-cert=" + bg.WIFI_CA_PATH, bg.wifi_keyfile(w, "u"))
+        self.save(w)
+        s = bg.wifi_saved()
+        self.assertEqual((s["ca"], s["ca_cert"]), ("custom", pem + "\n"))
+        kept = bg.clean_wifi(dict(self.ENT, ca="custom", ca_cert=bg.SECRET_MASK), s)
+        self.assertEqual(kept["ca_cert"], pem + "\n")
+        none = bg.wifi_keyfile(bg.clean_wifi(dict(self.ENT, ca="none")), "u")
+        self.assertNotIn("phase1-auth-flags", none)
+        self.assertNotIn("ca-cert", none)
+
+    def test_rejects_bad_input(self):
+        for bad in ({"ssid": ""}, {"ssid": "x" * 33}, {"ssid": "a", "password": "short"},
+                    {"ssid": "a", "security": "wep"}, {"ssid": "a", "password": "line\nbreak1"},
+                    dict(self.ENT, eap="tls"), dict(self.ENT, phase2="gtc"), dict(self.ENT, identity=""),
+                    dict(self.ENT, ca="custom", ca_cert="not a cert")):
+            with self.assertRaises(ValueError, msg=bad):
+                bg.clean_wifi(bad)
+        # A masked password with nothing stored is no password
+        with self.assertRaises(ValueError):
+            bg.clean_wifi({"ssid": "a", "password": bg.SECRET_MASK})
+
+    def test_scan_security(self):
+        self.assertEqual([bg.scan_security(f) for f in ("WPA2 802.1X", "WPA3", "WPA2 WPA3", "WPA1 WPA2", "", "--")],
+                         ["enterprise", "sae", "psk", "psk", "open", "open"])
 
 
 if __name__ == "__main__":
