@@ -231,15 +231,32 @@ Every push runs the **Checks** workflow (`.github/workflows/ci.yml`): `bash -n` 
 python3 -m unittest discover -s tests -v
 ```
 
+### Older base images
+
+A gateway keeps the Bobcat-Armbian base system it was flashed with: updates only rerun `install.sh` on it, and there is no safe way to replace the base system of a running gateway. So every release has to work on every base image any release has shipped on, and `tools/test-base-images.sh` checks that. It mounts each base listed in [image/SHIPPED_BASES](image/SHIPPED_BASES) read-only and runs the base's own programs under qemu (`apt install qemu-user-static`; Linux or WSL2, as root):
+
+- the tests in `tests/` with the base's Python;
+- every command `install.sh` and the web UI need is there, and `install.sh` won't need apt;
+- the shell scripts parse with the base's bash;
+- the device tree fix either installs cleanly or leaves the device tree untouched;
+- the base's NetworkManager accepts every kind of WiFi profile the web UI writes, and understands every setting in it.
+
+```bash
+sudo tools/test-base-images.sh
+```
+
+Upstream replaces its images in place, so each base is kept twice: as a local copy (found by checksum in `../bobcat-armbian`, or set `BOBCAT_GW_IMAGES`) and as the newest bobcat-gw release image built on it, which the script downloads if there's no local copy. When `image/BASE_IMAGE` changes, add the new base to `image/SHIPPED_BASES`, and never remove a line.
+
 ### Making a release
 
 The updater offers the highest `vX.Y.Z` tag, so a release is:
 
 1. Run `tools/check-upstream.sh`. Each release ships the newest upstream versions of the Bobcat-Armbian base image, sx1302_hal, Basics Station and the ChirpStack MQTT Forwarder (Tailscale is installed fresh from its stable repo on first boot). For anything newer it reports, bump the pin as it says, test it on a gateway and commit it. A new base image from [sicXnull/Bobcat-Armbian](https://github.com/sicXnull/Bobcat-Armbian) goes into `image/BASE_IMAGE`; a new sx1302_hal or Basics Station needs `prebuilt/aarch64/` rebuilt with `tools/build-binaries.sh`.
-2. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), commit, push main, and wait for the **Checks** workflow to pass (`gh run watch`).
-3. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. Gateways see it within a day, or straight away with **Check now**.
-4. Build the image from the tag (`tools/build-image.sh`, in a fresh clone of the tag) and attach it with its `.sha256` to a GitHub release for the tag (a full release, not a pre-release). Every release gets an image.
-5. Publishing the release runs the `Etcher button` workflow, which points the **Flash with Etcher** button in [Ready-made image](#ready-made-image) at the new image and commits that to main. Pull before your next change.
+2. Run `sudo tools/test-base-images.sh` (see [Older base images](#older-base-images)). Every base image must pass: gateways in the field run all of them.
+3. Set the new version in both `install.sh` (`VERSION="X.Y.Z"`) and `web/bobcat_gw.py` (`VERSION = "X.Y.Z"`), commit, push main, and wait for the **Checks** workflow to pass (`gh run watch`).
+4. Tag the commit and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. Gateways see it within a day, or straight away with **Check now**.
+5. Build the image from the tag (`tools/build-image.sh`, in a fresh clone of the tag) and attach it with its `.sha256` to a GitHub release for the tag (a full release, not a pre-release). Every release gets an image.
+6. Publishing the release runs the `Etcher button` workflow, which points the **Flash with Etcher** button in [Ready-made image](#ready-made-image) at the new image and commits that to main. Pull before your next change.
 
 The **What's new** link on the System tab opens the tag's page, with or without a GitHub release.
 
